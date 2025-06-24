@@ -2,12 +2,8 @@ name: MLflow CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
-  schedule:
-    # Run every Sunday at 2 AM UTC for automatic retraining
-    - cron: '0 2 * * 0'
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       experiment_name:
