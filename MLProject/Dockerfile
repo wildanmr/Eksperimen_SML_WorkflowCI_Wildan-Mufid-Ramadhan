@@ -1,5 +1,5 @@
 # Dockerfile for Diabetes Prediction Model
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 LABEL maintainer="wildanmr"
 LABEL description="Diabetes Prediction Model with MLflow"
