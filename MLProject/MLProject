@@ -35,6 +35,3 @@ entry_points:
       model_uri: {type: string}
       image_name: {type: string, default: "diabetes-prediction-model"}
     command: "mlflow models build-docker -m {model_uri} -n {image_name} --enable-mlserver"
-
-docker_env:
-  image: "python:3.9-slim"

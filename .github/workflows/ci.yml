@@ -211,8 +211,8 @@ jobs:
 
             # Install Python dependencies
             COPY conda.yaml .
-            RUN pip install mlflow==2.8.0 mlserver==1.3.5 mlserver-mlflow==1.3.5 \\
-                pandas numpy scikit-learn matplotlib seaborn joblib
+            COPY requirements.txt .
+            RUN pip install --no-cache-dir -r requirements.txt
 
             # Copy model and artifacts
             COPY saved_models/ ./saved_models/
