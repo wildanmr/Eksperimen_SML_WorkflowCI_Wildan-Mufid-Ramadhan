@@ -98,17 +98,62 @@ def setup_experiment(experiment_name):
         print(f"❌ Error setting up experiment: {e}")
         raise
 
+def download_dataset_if_needed(data_path):
+    """Download dataset from GitHub releases if not present locally"""
+    if not os.path.exists(data_path):
+        print(f"📥 Dataset not found at {data_path}, downloading from GitHub releases...")
+        
+        # GitHub releases URL for the dataset
+        dataset_url = "https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv"
+        
+        try:
+            import urllib.request
+            
+            print(f"🔄 Downloading from: {dataset_url}")
+            urllib.request.urlretrieve(dataset_url, data_path)
+            print(f"✅ Dataset downloaded successfully to: {data_path}")
+            
+            # Validate downloaded file
+            if os.path.exists(data_path) and os.path.getsize(data_path) > 0:
+                print(f"📊 Downloaded file size: {os.path.getsize(data_path)} bytes")
+                return True
+            else:
+                print(f"❌ Downloaded file is invalid or empty")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Failed to download dataset: {e}")
+            print("Please ensure the dataset URL is accessible and try again")
+            return False
+    else:
+        print(f"✅ Dataset found at: {data_path}")
+        return True
+
 def load_and_prepare_data(data_path):
-    """Load preprocessed data"""
+    """Load preprocessed data with automatic download if needed"""
     try:
+        # Download dataset if not present
+        if not download_dataset_if_needed(data_path):
+            raise FileNotFoundError(f"Could not obtain dataset: {data_path}")
+        
         if not os.path.exists(data_path):
             print(f"❌ Error: '{data_path}' not found")
             print(f"Current directory: {os.getcwd()}")
             print(f"Files in current directory: {os.listdir('.')}")
             raise FileNotFoundError(f"Dataset file not found: {data_path}")
         
+        print(f"📊 Loading dataset from: {data_path}")
         df = pd.read_csv(data_path)
         print(f"✅ Data loaded successfully: {df.shape}")
+        
+        # Validate dataset structure
+        required_columns = ['Diabetes_binary']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            print(f"❌ Missing required columns: {missing_columns}")
+            print(f"Available columns: {list(df.columns)}")
+            raise ValueError(f"Dataset missing required columns: {missing_columns}")
         
         # Pisahkan features dan target
         X = df.drop('Diabetes_binary', axis=1)
@@ -116,6 +161,7 @@ def load_and_prepare_data(data_path):
         
         print(f"✅ Features: {X.shape[1]}, Samples: {len(X)}")
         print(f"✅ Target distribution: {y.value_counts().to_dict()}")
+        print(f"📋 Feature columns: {list(X.columns)[:10]}{'...' if len(X.columns) > 10 else ''}")
         
         return train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
         

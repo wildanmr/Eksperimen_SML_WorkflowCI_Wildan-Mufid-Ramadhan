@@ -2,8 +2,12 @@ name: MLflow CI/CD Pipeline
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run every Sunday at 2 AM UTC for automatic retraining
+    - cron: '0 2 * * 0'
   workflow_dispatch:
     inputs:
       experiment_name:
@@ -58,21 +62,38 @@ jobs:
     - name: Install MLflow and dependencies
       run: |
         pip install --upgrade pip
-        pip install mlflow==2.8.0
-        pip install dagshub==0.3.12
-        pip install pandas numpy scikit-learn matplotlib seaborn joblib
-        pip install mlserver==1.3.5 mlserver-mlflow==1.3.5
+        pip install -r MLProject/requirements.txt
         
-    - name: Verify dataset exists
+    - name: Download dataset from GitHub releases
       run: |
         cd MLProject
+        echo "📥 Downloading latest dataset from GitHub releases..."
+        
+        # Download dataset from your releases
+        curl -L -o diabetes_preprocessed.csv \
+          "https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv"
+        
+        # Verify download
         if [ ! -f "diabetes_preprocessed.csv" ]; then
-          echo "❌ Dataset not found!"
-          ls -la
+          echo "❌ Failed to download dataset!"
           exit 1
+        fi
+        
+        # Check file size and format
+        echo "✅ Dataset downloaded successfully"
+        echo "📊 Dataset info:"
+        echo "   File size: $(du -h diabetes_preprocessed.csv | cut -f1)"
+        echo "   Line count: $(wc -l < diabetes_preprocessed.csv)"
+        echo "   First few lines:"
+        head -5 diabetes_preprocessed.csv
+        
+        # Validate CSV format
+        echo "🔍 Validating CSV format..."
+        if python3 -c "import pandas as pd; df = pd.read_csv('diabetes_preprocessed.csv'); print(f'✅ Valid CSV: {df.shape[0]} rows, {df.shape[1]} columns'); print(f'Columns: {list(df.columns)[:5]}...')"; then
+          echo "✅ Dataset validation successful"
         else
-          echo "✅ Dataset found"
-          head -5 diabetes_preprocessed.csv
+          echo "❌ Dataset validation failed"
+          exit 1
         fi
         
     - name: Authenticate with DagsHub
