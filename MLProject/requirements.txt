@@ -2,6 +2,7 @@ dagshub==0.5.10
 joblib==1.5.1
 matplotlib==3.10.3
 mlflow==2.22.0
+mlflow-skinny==2.22.0
 mlserver==1.7.1
 mlserver-mlflow==1.7.1
 numpy==2.3.1
