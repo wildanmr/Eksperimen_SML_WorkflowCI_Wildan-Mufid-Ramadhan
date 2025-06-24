@@ -15,7 +15,7 @@ Workflow-CI/
 │   ├── MLProject                     # MLflow project configuration
 │   ├── predict.py                    # Model serving script
 │   ├── Dockerfile                    # Docker configuration
-│   ├── diabetes_preprocessed.csv     # Your preprocessed dataset
+│   ├── diabetes_preprocessed.csv     # Preprocessed dataset
 │   └── RUN_SUMMARY.md               # Auto-updated run summaries
 └── README.md                        # This file
 ```
@@ -26,10 +26,10 @@ Workflow-CI/
 
 ```bash
 # Pull the image
-docker pull YOUR_USERNAME/diabetes-prediction-model:latest
+docker pull wildanmr/diabetes-prediction-model:latest
 
 # Run the container
-docker run -p 8080:8080 YOUR_USERNAME/diabetes-prediction-model:latest
+docker run -p 8080:8080 wildanmr/diabetes-prediction-model:latest
 ```
 
 ### API Endpoints
