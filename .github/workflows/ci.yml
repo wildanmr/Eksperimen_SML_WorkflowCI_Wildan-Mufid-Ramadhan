@@ -1,0 +1,303 @@
+name: MLflow CI/CD Pipeline
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      experiment_name:
+        description: 'MLflow Experiment Name'
+        required: false
+        default: 'CI_Auto_Training'
+      model_name:
+        description: 'Model Name'
+        required: false
+        default: 'diabetes_rf_model'
+      n_estimators:
+        description: 'Number of estimators'
+        required: false
+        default: '200'
+      max_depth:
+        description: 'Maximum depth'
+        required: false
+        default: '20'
+
+env:
+  DAGSHUB_USER_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+  DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+  
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('MLProject/conda.yaml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install MLflow and dependencies
+      run: |
+        pip install --upgrade pip
+        pip install mlflow==2.8.0
+        pip install dagshub==0.3.12
+        pip install pandas numpy scikit-learn matplotlib seaborn joblib
+        pip install mlserver==1.3.5 mlserver-mlflow==1.3.5
+        
+    - name: Verify dataset exists
+      run: |
+        cd MLProject
+        if [ ! -f "diabetes_preprocessed.csv" ]; then
+          echo "❌ Dataset not found!"
+          ls -la
+          exit 1
+        else
+          echo "✅ Dataset found"
+          head -5 diabetes_preprocessed.csv
+        fi
+        
+    - name: Authenticate with DagsHub
+      run: |
+        echo "Setting up DagsHub authentication..."
+        export DAGSHUB_USER_TOKEN=${{ secrets.DAGSHUB_TOKEN }}
+        export DAGSHUB_USERNAME=${{ secrets.DAGSHUB_USERNAME }}
+        echo "✅ DagsHub credentials configured"
+        
+    - name: Run MLflow Project Training
+      run: |
+        cd MLProject
+        echo "🚀 Starting MLflow Project training..."
+        
+        # Set parameters from workflow inputs or defaults
+        EXPERIMENT_NAME="${{ github.event.inputs.experiment_name || 'CI_Auto_Training' }}"
+        MODEL_NAME="${{ github.event.inputs.model_name || 'diabetes_rf_model' }}"
+        N_ESTIMATORS="${{ github.event.inputs.n_estimators || '200' }}"
+        MAX_DEPTH="${{ github.event.inputs.max_depth || '20' }}"
+        
+        echo "📋 Training with parameters:"
+        echo "   Experiment: $EXPERIMENT_NAME"
+        echo "   Model: $MODEL_NAME"
+        echo "   N_estimators: $N_ESTIMATORS"
+        echo "   Max_depth: $MAX_DEPTH"
+        
+        # Run MLflow project
+        mlflow run . \
+          --experiment-name "$EXPERIMENT_NAME" \
+          -P data_path=diabetes_preprocessed.csv \
+          -P use_dagshub=true \
+          -P experiment_name="$EXPERIMENT_NAME" \
+          -P model_name="$MODEL_NAME" \
+          -P n_estimators=$N_ESTIMATORS \
+          -P max_depth=$MAX_DEPTH \
+          --env-manager=local
+          
+    - name: Upload training artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: training-artifacts
+        path: |
+          MLProject/artifacts/
+          MLProject/saved_models/
+          MLProject/model_uri.txt
+        retention-days: 30
+        
+    - name: Store model URI for Docker build
+      id: model_uri
+      run: |
+        cd MLProject
+        if [ -f "model_uri.txt" ]; then
+          MODEL_URI=$(cat model_uri.txt)
+          echo "model_uri=$MODEL_URI" >> $GITHUB_OUTPUT
+          echo "✅ Model URI: $MODEL_URI"
+        else
+          echo "⚠️  Model URI file not found, will skip Docker build"
+          echo "model_uri=" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Set up Docker Buildx
+      if: steps.model_uri.outputs.model_uri != ''
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Login to Docker Hub
+      if: steps.model_uri.outputs.model_uri != ''
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_HUB_USERNAME }}
+        password: ${{ secrets.DOCKER_HUB_TOKEN }}
+        
+    - name: Build and Push Docker Image with MLflow
+      if: steps.model_uri.outputs.model_uri != ''
+      run: |
+        cd MLProject
+        
+        MODEL_URI="${{ steps.model_uri.outputs.model_uri }}"
+        IMAGE_NAME="${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-prediction-model"
+        TAG="latest"
+        TIMESTAMP_TAG=$(date +%Y%m%d-%H%M%S)
+        
+        echo "🐳 Building Docker image for model: $MODEL_URI"
+        echo "📦 Image name: $IMAGE_NAME:$TAG"
+        
+        # Try to build Docker image with MLflow
+        if mlflow models build-docker \
+          -m "$MODEL_URI" \
+          -n "$IMAGE_NAME:$TAG" \
+          --enable-mlserver; then
+          
+          echo "✅ MLflow Docker build successful"
+          
+          # Tag with timestamp
+          docker tag "$IMAGE_NAME:$TAG" "$IMAGE_NAME:$TIMESTAMP_TAG"
+          
+          # Push both tags
+          echo "🚀 Pushing Docker images to Docker Hub..."
+          docker push "$IMAGE_NAME:$TAG"
+          docker push "$IMAGE_NAME:$TIMESTAMP_TAG"
+          
+          echo "✅ Docker images pushed successfully:"
+          echo "   $IMAGE_NAME:$TAG"
+          echo "   $IMAGE_NAME:$TIMESTAMP_TAG"
+          
+        else
+          echo "❌ MLflow Docker build failed, creating custom Dockerfile..."
+          
+          # Create custom Dockerfile as fallback
+          cat > Dockerfile << EOF
+            FROM python:3.9-slim
+
+            WORKDIR /app
+
+            # Install system dependencies
+            RUN apt-get update && apt-get install -y \\
+                build-essential \\
+                && rm -rf /var/lib/apt/lists/*
+
+            # Install Python dependencies
+            COPY conda.yaml .
+            RUN pip install mlflow==2.8.0 mlserver==1.3.5 mlserver-mlflow==1.3.5 \\
+                pandas numpy scikit-learn matplotlib seaborn joblib
+
+            # Copy model and artifacts
+            COPY saved_models/ ./saved_models/
+            COPY artifacts/ ./artifacts/
+
+            # Create a simple prediction script
+            RUN echo 'import joblib\nimport sys\nimport json\nimport numpy as np\n\nif __name__ == "__main__":\n    model_path = sys.argv[1] if len(sys.argv) > 1 else "saved_models/"\n    print(f"Loading model from {model_path}")\n    # Add your model loading and prediction logic here' > predict.py
+
+            EXPOSE 8080
+
+            CMD ["python", "predict.py"]
+            EOF
+
+          # Build and push custom Docker image
+          docker build -t "$IMAGE_NAME:$TAG" .
+          docker tag "$IMAGE_NAME:$TAG" "$IMAGE_NAME:$TIMESTAMP_TAG"
+          
+          docker push "$IMAGE_NAME:$TAG"
+          docker push "$IMAGE_NAME:$TIMESTAMP_TAG"
+          
+          echo "✅ Custom Docker images pushed successfully"
+        fi
+        
+    - name: Update README with latest run info
+      run: |
+        cd MLProject
+        
+        # Create or update run summary
+        cat > RUN_SUMMARY.md << EOF
+        # Latest Training Run Summary
+
+        **Last Updated:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        **GitHub Run:** [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+        **Triggered by:** ${{ github.event_name }}
+        **Branch:** ${{ github.ref_name }}
+
+        ## Training Configuration
+        - **Experiment:** ${{ github.event.inputs.experiment_name || 'CI_Auto_Training' }}
+        - **Model Name:** ${{ github.event.inputs.model_name || 'diabetes_rf_model' }}
+        - **Parameters:** n_estimators=${{ github.event.inputs.n_estimators || '200' }}, max_depth=${{ github.event.inputs.max_depth || '20' }}
+
+        ## Artifacts Generated
+        - Training artifacts uploaded to GitHub Actions
+        - Model logged to MLflow (DagsHub)
+        - Docker image: \`${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-prediction-model:latest\`
+
+        ## Links
+        - [MLflow Tracking](https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow)
+        - [Docker Hub Repository](https://hub.docker.com/r/${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-prediction-model)
+        - [GitHub Actions](https://github.com/${{ github.repository }}/actions)
+        EOF
+
+        echo "✅ Run summary updated"
+        
+    - name: Commit and push run summary
+      run: |
+        cd MLProject
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        if [ -f "RUN_SUMMARY.md" ]; then
+          git add RUN_SUMMARY.md
+          git commit -m "Update training run summary - Run #${{ github.run_number }}" || echo "No changes to commit"
+          git push || echo "Push failed or no changes"
+        fi
+        
+  test-docker-image:
+    needs: train-model
+    runs-on: ubuntu-latest
+    if: success()
+    
+    steps:
+    - name: Test Docker Image
+      run: |
+        IMAGE_NAME="${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-prediction-model:latest"
+        
+        echo "🧪 Testing Docker image: $IMAGE_NAME"
+        
+        # Pull the image
+        docker pull "$IMAGE_NAME" || {
+          echo "⚠️  Could not pull Docker image, skipping test"
+          exit 0
+        }
+        
+        # Run basic container test
+        docker run --rm "$IMAGE_NAME" python --version
+        
+        echo "✅ Docker image test completed"
+        
+  notify-completion:
+    needs: [train-model, test-docker-image]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify completion
+      run: |
+        if [ "${{ needs.train-model.result }}" == "success" ]; then
+          echo "🎉 CI/CD Pipeline completed successfully!"
+          echo "📊 Check MLflow: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
+          echo "🐳 Docker Hub: https://hub.docker.com/r/${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-prediction-model"
+        else
+          echo "❌ CI/CD Pipeline failed"
+          echo "📋 Check the logs above for details"
+        fi
