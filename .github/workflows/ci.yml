@@ -70,7 +70,7 @@ jobs:
       run: |
         cd MLProject
         echo "Starting MLflow run..."
-        mlflow run . --no-conda
+        mlflow run . -e main
     
     - name: List generated artifacts
       shell: bash -l {0}
