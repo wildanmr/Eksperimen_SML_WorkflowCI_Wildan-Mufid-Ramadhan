@@ -55,8 +55,8 @@ Once the pipeline completes, the following Docker images are available:
 ### Run Serving Container
 
 ```bash
-docker pull <username>/diabetes-ml-mlflow:latest
-docker run -p 5000:5000 <username>/diabetes-ml-mlflow:latest
+docker pull wildanmr/diabetes-ml-mlflow:latest
+docker run -p 5000:5000 wildanmr/diabetes-ml-mlflow:latest
 ```
 
 ## 📋 Model Details
