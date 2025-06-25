@@ -90,7 +90,7 @@ jobs:
         echo "📏 Max Depth: ${MAX_DEPTH:-'default (grid search)'}"
         
         # Build mlflow run command with parameters
-        MLFLOW_CMD="mlflow run . --experiment-name 'CI_Auto_Training' -P use_dagshub=$USE_DAGSHUB --env-manager conda"
+        MLFLOW_CMD="mlflow run . --experiment-name CI_Auto_Training -P use_dagshub=$USE_DAGSHUB --env-manager conda"
         
         # Add optional parameters if provided
         if [ ! -z "$N_ESTIMATORS" ]; then
