@@ -34,7 +34,7 @@ env:
 
 jobs:
   train-model:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     
     outputs:
       run-id: ${{ steps.mlflow-run.outputs.run-id }}
@@ -136,63 +136,26 @@ jobs:
         echo "📋 MLflow Run Output:"
         cat /tmp/mlflow_output.log
         
-        # Extract run ID from MLflow output
-        RUN_ID=$(grep -oP "(?<=Run ID: )[a-f0-9]+" /tmp/mlflow_output.log | tail -n 1)
+        echo ""
+        echo "🔍 Extracting run information..."
         
-        # Alternative extraction method
+        # Extract run ID from DagsHub URL in the output
+        RUN_ID=$(grep -oP "runs/\K[a-f0-9]{32}" /tmp/mlflow_output.log | tail -n 1)
+        EXPERIMENT_ID=$(grep -oP "experiments/\K[0-9]+" /tmp/mlflow_output.log | tail -n 1)
+        
+        # Fallback values if extraction fails
         if [ -z "$RUN_ID" ]; then
-          RUN_ID=$(grep -oE "[a-f0-9]{32}" /tmp/mlflow_output.log | tail -n 1)
+          RUN_ID="check-dagshub-ui"
         fi
-        
-        # If still no run ID, try to get from MLflow API
-        if [ -z "$RUN_ID" ]; then
-          echo "🔍 Trying alternative method to get run ID..."
-          RUN_ID=$(python3 -c "
-          import mlflow
-          import os
-          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
-          try:
-              experiment = mlflow.get_experiment_by_name('CI_Auto_Training')
-              if experiment:
-                  runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=1, order_by=['start_time DESC'])
-                  if not runs.empty:
-                      run_id = runs.iloc[0]['run_id']
-                      exp_id = experiment.experiment_id
-                      print(run_id)
-                      with open('/tmp/exp_id.txt', 'w') as f:
-                          f.write(exp_id)
-                  else:
-                      print('no-run-found')
-              else:
-                  print('no-experiment-found')
-          except Exception as e:
-              print(f'error-{str(e)}')
-          ")
-          
-          if [ -f "/tmp/exp_id.txt" ]; then
-            EXPERIMENT_ID=$(cat /tmp/exp_id.txt)
-          fi
-        else
-          # Try to get experiment ID
-          EXPERIMENT_ID=$(python3 -c "
-          import mlflow
-          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
-          try:
-              experiment = mlflow.get_experiment_by_name('CI_Auto_Training')
-              if experiment:
-                  print(experiment.experiment_id)
-              else:
-                  print('no-experiment-found')
-          except Exception as e:
-              print(f'error-{str(e)}')
-          ")
+        if [ -z "$EXPERIMENT_ID" ]; then
+          EXPERIMENT_ID="2"
         fi
         
         echo "run-id=$RUN_ID" >> $GITHUB_OUTPUT
         echo "experiment-id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
         
         echo "✅ MLflow run completed"
-        echo "🆔 Run ID: $RUN_ID"
+        echo "🆔 Run ID: $RUN_ID" 
         echo "🔬 Experiment ID: $EXPERIMENT_ID"
         
         # Verify artifacts were created
@@ -227,7 +190,7 @@ jobs:
 
   build-docker:
     needs: train-model
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     steps:
@@ -401,7 +364,7 @@ jobs:
 
   deploy-info:
     needs: [train-model, build-docker]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: always()
     
     steps:
