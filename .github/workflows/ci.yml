@@ -105,7 +105,7 @@ jobs:
         
         # Run MLflow project with output capture
         echo "🔄 Starting MLflow run..."
-        RUN_OUTPUT=$(eval $MLFLOW_CMD 2>&1 | tee /tmp/mlflow_output.log)
+        PYTHONUNBUFFERED=1 eval "$MLFLOW_CMD" | tee /tmp/mlflow_output.log
         
         echo "📋 MLflow Run Output:"
         cat /tmp/mlflow_output.log
