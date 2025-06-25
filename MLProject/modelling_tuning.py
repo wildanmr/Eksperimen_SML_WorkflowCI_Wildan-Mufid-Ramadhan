@@ -16,11 +16,38 @@ import os
 import argparse
 warnings.filterwarnings('ignore')
 
+
 def setup_dagshub_mlflow():
     """Setup DagsHub and MLflow with proper authentication"""
     try:
-        # Initialize DagsHub
-        dagshub.init(repo_owner="wildanmr", repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
+        import os
+        
+        # Set authentication environment variables first
+        dagshub_username = os.getenv('DAGSHUB_USERNAME') or os.getenv('MLFLOW_TRACKING_USERNAME')
+        dagshub_token = os.getenv('DAGSHUB_TOKEN') or os.getenv('MLFLOW_TRACKING_PASSWORD')
+        
+        if not dagshub_username or not dagshub_token:
+            print("❌ Error: DAGSHUB_USERNAME and DAGSHUB_TOKEN environment variables are required")
+            print("Please set these in your environment or GitHub secrets")
+            return False
+        
+        # Set MLflow tracking credentials
+        os.environ['MLFLOW_TRACKING_USERNAME'] = dagshub_username
+        os.environ['MLFLOW_TRACKING_PASSWORD'] = dagshub_token
+        
+        print(f"✅ Authentication set for user: {dagshub_username}")
+        
+        # Now initialize DagsHub - this should not trigger OAuth
+        try:
+            # Set environment variable to prevent OAuth
+            os.environ['DAGSHUB_CLIENT_FAIL_IF_NO_TOKEN'] = 'true'
+            
+            # Initialize DagsHub
+            dagshub.init(repo_owner="wildanmr", repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
+            print("✅ DagsHub initialized successfully")
+        except Exception as e:
+            print(f"⚠️  DagsHub init warning: {e}")
+            print("Proceeding with direct MLflow setup...")
         
         # Set tracking URI
         tracking_uri = "https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
@@ -33,7 +60,7 @@ def setup_dagshub_mlflow():
             print(f"✅ Found {len(experiments)} existing experiments")
         except Exception as e:
             print(f"⚠️  Warning: Could not list experiments: {e}")
-            print("Make sure you're authenticated with DagsHub")
+            print("This might be normal on first connection")
         
         return True
         

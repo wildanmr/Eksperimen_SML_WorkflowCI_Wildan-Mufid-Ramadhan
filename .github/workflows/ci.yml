@@ -75,8 +75,31 @@ jobs:
     
     - name: Run MLflow Project with conda environment
       id: mlflow-run
+      env:
+        # Ensure authentication environment variables are set
+        DAGSHUB_USERNAME: ${{ env.DAGSHUB_USERNAME }}
+        DAGSHUB_TOKEN: ${{ env.DAGSHUB_TOKEN }}
+        MLFLOW_TRACKING_USERNAME: ${{ env.DAGSHUB_USERNAME }}
+        MLFLOW_TRACKING_PASSWORD: ${{ env.DAGSHUB_TOKEN }}
+        MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
+        # Prevent OAuth flow in CI
+        DAGSHUB_CLIENT_FAIL_IF_NO_TOKEN: "true"
       run: |
         cd MLProject
+        
+        # Verify authentication environment variables
+        echo "🔐 Checking authentication setup..."
+        if [ -z "$DAGSHUB_USERNAME" ]; then
+          echo "❌ DAGSHUB_USERNAME not set"
+          exit 1
+        fi
+        if [ -z "$DAGSHUB_TOKEN" ]; then
+          echo "❌ DAGSHUB_TOKEN not set"
+          exit 1
+        fi
+        echo "✅ Authentication credentials are configured"
+        echo "👤 Username: $DAGSHUB_USERNAME"
+        echo "🔗 Tracking URI: $MLFLOW_TRACKING_URI"
         
         # Set parameters from workflow inputs
         USE_DAGSHUB="${{ github.event.inputs.use_dagshub || 'true' }}"
@@ -84,7 +107,6 @@ jobs:
         MAX_DEPTH="${{ github.event.inputs.max_depth }}"
         
         echo "🚀 Running MLflow Project with mlflow run..."
-        echo "📊 Tracking URI: $MLFLOW_TRACKING_URI"
         echo "🔧 Use DagsHub: $USE_DAGSHUB"
         echo "🌳 N Estimators: ${N_ESTIMATORS:-'default (grid search)'}"
         echo "📏 Max Depth: ${MAX_DEPTH:-'default (grid search)'}"
@@ -102,9 +124,13 @@ jobs:
         fi
         
         echo "📝 Command: $MLFLOW_CMD"
+        echo ""
         
-        # Run MLflow project with output capture
-        echo "🔄 Starting MLflow run..."
+        # Run with authentication already set in environment
+        echo "🔄 Starting MLflow run with authentication..."
+        set -o pipefail
+        
+        # Run command with all environment variables properly set
         PYTHONUNBUFFERED=1 eval "$MLFLOW_CMD" | tee /tmp/mlflow_output.log
         
         echo "📋 MLflow Run Output:"
