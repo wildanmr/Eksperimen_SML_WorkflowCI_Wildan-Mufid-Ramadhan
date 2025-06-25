@@ -12,28 +12,31 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 import warnings
-import sys
 import os
 warnings.filterwarnings('ignore')
+
+# Set matplotlib backend untuk CI environment
+import matplotlib
+matplotlib.use('Agg')
 
 def setup_dagshub_mlflow():
     """Setup DagsHub and MLflow with proper authentication"""
     try:
-        # Get credentials from environment variables (set by GitHub Actions)
-        dagshub_token = os.getenv('DAGSHUB_TOKEN')
-        dagshub_username = os.getenv('DAGSHUB_USERNAME', 'wildanmr')
+        # Get credentials from environment variables (for CI)
+        username = os.getenv('DAGSHUB_USERNAME') or os.getenv('MLFLOW_TRACKING_USERNAME')
+        password = os.getenv('DAGSHUB_PASSWORD') or os.getenv('MLFLOW_TRACKING_PASSWORD')
         
-        if dagshub_token:
-            os.environ['DAGSHUB_USER_TOKEN'] = dagshub_token
-            os.environ['MLFLOW_TRACKING_USERNAME'] = dagshub_username
-            os.environ['MLFLOW_TRACKING_PASSWORD'] = dagshub_token
-            print(f"✅ DagsHub credentials configured from environment")
+        if username and password:
+            # Set DagsHub credentials
+            os.environ['MLFLOW_TRACKING_USERNAME'] = username
+            os.environ['MLFLOW_TRACKING_PASSWORD'] = password
+            print(f"✅ Using DagsHub credentials for user: {username}")
         
         # Initialize DagsHub
-        dagshub.init(repo_owner=dagshub_username, repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
+        dagshub.init(repo_owner="wildanmr", repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
         
-        # Set tracking URI from environment or default
-        tracking_uri = os.getenv('MLFLOW_TRACKING_URI', f"https://dagshub.com/{dagshub_username}/SMSML_Wildan-Mufid-Ramadhan.mlflow")
+        # Set tracking URI
+        tracking_uri = "https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
         mlflow.set_tracking_uri(tracking_uri)
         
         # Test connection
@@ -43,18 +46,19 @@ def setup_dagshub_mlflow():
             print(f"✅ Found {len(experiments)} existing experiments")
         except Exception as e:
             print(f"⚠️  Warning: Could not list experiments: {e}")
+            print("Make sure you're authenticated with DagsHub")
         
         return True
         
     except Exception as e:
         print(f"❌ Error setting up DagsHub/MLflow: {e}")
+        print("Please check your DagsHub credentials and repository access")
         return False
 
 def setup_local_mlflow():
     """Setup local MLflow tracking as fallback"""
     mlflow.set_tracking_uri("file:./mlruns")
     print("✅ Using local MLflow tracking")
-    print("✅ Make sure to run 'mlflow ui' in terminal to view results")
     return True
 
 def setup_experiment(experiment_name):
@@ -286,7 +290,7 @@ def log_model_safely(model, X_train, use_dagshub=True):
     # Strategy 4: Save locally only
     if not model_logged:
         print("🔄 All MLflow model logging methods failed, saving locally only...")
-        local_path = save_model_locally(model, "advanced_random_forest")
+        local_path = save_model_locally(model, "ci_random_forest")
         if local_path:
             print("✅ Model saved locally as fallback")
             model_path = local_path
@@ -294,10 +298,10 @@ def log_model_safely(model, X_train, use_dagshub=True):
     return model_logged, model_path
 
 def train_model_with_tuning(use_dagshub=True):
-    """Train model with hyperparameter tuning and robust model logging"""
+    """Train model with hyperparameter tuning - simplified for CI"""
     
     try:
-        # Setup tracking
+        # Setup tracking - try DagsHub first, fallback to local
         if use_dagshub and setup_dagshub_mlflow():
             print("✅ Using DagsHub MLflow tracking")
         else:
@@ -308,23 +312,22 @@ def train_model_with_tuning(use_dagshub=True):
         X_train, X_test, y_train, y_test = load_and_prepare_data()
         feature_names = X_train.columns.tolist() if hasattr(X_train, 'columns') else None
         
-        # Create experiment
-        experiment_name = "CI_Auto_Training"
+        # Create experiment with a fixed name
+        experiment_name = "CI_ML_Experiment"
         experiment_id = setup_experiment(experiment_name)
         
         # Disable autolog to prevent duplicate models
         mlflow.sklearn.autolog(disable=True)
         
-        with mlflow.start_run(experiment_id=experiment_id, run_name=f"RandomForest_Advanced_Tuning_{datetime.now().strftime('%H%M%S')}") as run:
+        with mlflow.start_run(experiment_id=experiment_id, run_name=f"CI_RandomForest_{datetime.now().strftime('%Y%m%d_%H%M%S')}") as run:
             print(f"✅ Started MLflow run: {run.info.run_id}")
-            print(f"Run ID: {run.info.run_id}")
+            print(f"✅ Experiment ID: {run.info.experiment_id}")
             
-            # Hyperparameter tuning
+            # Simplified hyperparameter tuning for CI (faster)
             param_grid = {
-                'n_estimators': [100, 200, 300],
-                'max_depth': [10, 20, None],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4]
+                'n_estimators': [100, 200],
+                'max_depth': [10, 20],
+                'min_samples_split': [2, 5]
             }
             
             # Log hyperparameter grid
@@ -332,14 +335,14 @@ def train_model_with_tuning(use_dagshub=True):
                 "param_grid_n_estimators": str(param_grid['n_estimators']),
                 "param_grid_max_depth": str(param_grid['max_depth']),
                 "param_grid_min_samples_split": str(param_grid['min_samples_split']),
-                "param_grid_min_samples_leaf": str(param_grid['min_samples_leaf']),
                 "cv_folds": 3,
                 "scoring": "accuracy",
                 "model_type": "RandomForestClassifier",
                 "train_size": len(X_train),
                 "test_size": len(X_test),
                 "n_features": len(X_train.columns) if hasattr(X_train, 'columns') else X_train.shape[1],
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "environment": "CI"
             })
             
             # Grid Search
@@ -390,7 +393,7 @@ def train_model_with_tuning(use_dagshub=True):
             print("🔄 Creating visualizations...")
             
             # Feature importance plot
-            fi_path = create_feature_importance_plot(best_model, feature_names, "Advanced Random Forest")
+            fi_path = create_feature_importance_plot(best_model, feature_names, "CI Random Forest")
             if fi_path and os.path.exists(fi_path):
                 try:
                     mlflow.log_artifact(fi_path)
@@ -399,7 +402,7 @@ def train_model_with_tuning(use_dagshub=True):
                     print(f"⚠️  Warning: Could not log feature importance to MLflow: {e}")
             
             # Confusion matrix
-            cm_path = create_confusion_matrix_plot(y_test, y_pred, "Advanced Random Forest")
+            cm_path = create_confusion_matrix_plot(y_test, y_pred, "CI Random Forest")
             if cm_path and os.path.exists(cm_path):
                 try:
                     mlflow.log_artifact(cm_path)
@@ -411,9 +414,12 @@ def train_model_with_tuning(use_dagshub=True):
             try:
                 report = classification_report(y_test, y_pred)
                 os.makedirs('artifacts', exist_ok=True)
-                report_path = 'artifacts/classification_report_advanced.txt'
+                report_path = 'artifacts/classification_report_ci.txt'
                 with open(report_path, 'w') as f:
                     f.write(report)
+                    f.write(f"\n\nTraining completed at: {datetime.now().isoformat()}")
+                    f.write(f"\nEnvironment: CI/CD Pipeline")
+                    f.write(f"\nRun ID: {run.info.run_id}")
                 mlflow.log_artifact(report_path)
                 print("✅ Classification report logged to MLflow")
             except Exception as e:
@@ -426,7 +432,7 @@ def train_model_with_tuning(use_dagshub=True):
             if not model_logged:
                 print("❌ All model logging strategies failed!")
                 # Save locally as final fallback
-                local_path = save_model_locally(best_model, "final_fallback_random_forest")
+                local_path = save_model_locally(best_model, "ci_fallback_random_forest")
                 if local_path:
                     model_path = local_path
             
@@ -434,9 +440,15 @@ def train_model_with_tuning(use_dagshub=True):
             if model_path:
                 mlflow.log_param("model_save_path", model_path)
             
+            # Log CI-specific information
+            mlflow.log_param("ci_run", True)
+            mlflow.log_param("github_run_number", os.getenv('GITHUB_RUN_NUMBER', 'unknown'))
+            mlflow.log_param("github_ref", os.getenv('GITHUB_REF', 'unknown'))
+            mlflow.log_param("github_sha", os.getenv('GITHUB_SHA', 'unknown'))
+            
             # Print summary
             print("\n" + "="*60)
-            print("🎉 TRAINING COMPLETED SUCCESSFULLY!")
+            print("🎉 CI TRAINING COMPLETED SUCCESSFULLY!")
             print("="*60)
             print(f"Best parameters: {grid_search.best_params_}")
             print(f"Best cross-validation score: {grid_search.best_score_:.4f}")
@@ -465,23 +477,47 @@ def train_model_with_tuning(use_dagshub=True):
         print(f"❌ Error during training: {e}")
         import traceback
         traceback.print_exc()
+        # Exit with error code for CI
         raise e
 
 if __name__ == "__main__":
-    print("🚀 Starting Advanced MLflow Training...")
+    print("🚀 Starting CI MLflow Training...")
     print("="*60)
     
+    # Always use DagsHub in CI
+    USE_DAGSHUB = True
+    
     try:
-        model, metrics, run_id = train_model_with_tuning(use_dagshub=True)
-        print(f"\n✅ Training completed successfully! Run ID: {run_id}")
-        
-        # Write run ID to a file for CI/CD to pick up
-        with open('run_id.txt', 'w') as f:
-            f.write(run_id)
+        model, metrics, run_id = train_model_with_tuning(use_dagshub=USE_DAGSHUB)
+        print("\n✅ CI Training completed successfully!")
         
         print("🔗 Check your DagsHub repository for MLflow tracking results:")
         print("   https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow")
         
+        # Create summary file for CI
+        summary_path = 'training_summary.txt'
+        with open(summary_path, 'w') as f:
+            f.write(f"Training Summary - {datetime.now().isoformat()}\n")
+            f.write("="*50 + "\n")
+            f.write(f"MLflow Run ID: {run_id}\n")
+            f.write(f"Test Accuracy: {metrics['accuracy']:.4f}\n")
+            f.write(f"F1 Score (Weighted): {metrics['f1_weighted']:.4f}\n")
+            f.write(f"Precision (Weighted): {metrics['precision_weighted']:.4f}\n")
+            f.write(f"Recall (Weighted): {metrics['recall_weighted']:.4f}\n")
+            f.write("\nTraining completed successfully in CI environment!\n")
+        
+        print(f"✅ Training summary saved to: {summary_path}")
+        
     except Exception as e:
-        print(f"\n❌ Training failed: {e}")
-        sys.exit(1)
+        print(f"\n❌ CI Training failed: {e}")
+        print("Please check your data path, column names, and authentication.")
+        # Create error log for CI
+        error_path = 'training_error.txt'
+        with open(error_path, 'w') as f:
+            f.write(f"Training Error - {datetime.now().isoformat()}\n")
+            f.write("="*50 + "\n")
+            f.write(f"Error: {str(e)}\n")
+            f.write("\nPlease check the logs for more details.\n")
+        
+        # Exit with error code for CI
+        exit(1)

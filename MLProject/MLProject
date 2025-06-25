@@ -1,4 +1,4 @@
-name: diabetes-prediction-ml
+name: ml-env
 
 conda_env: conda.yaml
 
