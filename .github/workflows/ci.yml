@@ -90,7 +90,7 @@ jobs:
         echo "📏 Max Depth: ${MAX_DEPTH:-'default (grid search)'}"
         
         # Build mlflow run command with parameters
-        MLFLOW_CMD="mlflow run . --experiment-name 'Advanced_ML_Experiment' -P use_dagshub=$USE_DAGSHUB --env-manager conda"
+        MLFLOW_CMD="mlflow run . --experiment-name 'CI_Auto_Training' -P use_dagshub=$USE_DAGSHUB --env-manager conda"
         
         # Add optional parameters if provided
         if [ ! -z "$N_ESTIMATORS" ]; then
@@ -126,7 +126,7 @@ jobs:
           import os
           mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
           try:
-              experiment = mlflow.get_experiment_by_name('Advanced_ML_Experiment')
+              experiment = mlflow.get_experiment_by_name('CI_Auto_Training')
               if experiment:
                   runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=1, order_by=['start_time DESC'])
                   if not runs.empty:
@@ -152,7 +152,7 @@ jobs:
           import mlflow
           mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
           try:
-              experiment = mlflow.get_experiment_by_name('Advanced_ML_Experiment')
+              experiment = mlflow.get_experiment_by_name('CI_Auto_Training')
               if experiment:
                   print(experiment.experiment_id)
               else:
