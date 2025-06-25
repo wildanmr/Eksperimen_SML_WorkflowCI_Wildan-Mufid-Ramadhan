@@ -1,37 +1,20 @@
-name: diabetes-prediction-ci
+name: diabetes-prediction-ml
 
-conda_env: conda.yaml
+python_env: conda.yaml
 
 entry_points:
   main:
     parameters:
-      data_path: {type: string, default: "diabetes_preprocessed.csv"}
       use_dagshub: {type: bool, default: true}
-      experiment_name: {type: string, default: "CI_Auto_Training"}
-      model_name: {type: string, default: "diabetes_rf_model"}
-      max_depth: {type: int, default: 20}
-      n_estimators: {type: int, default: 200}
-      min_samples_split: {type: int, default: 5}
-      min_samples_leaf: {type: int, default: 2}
-      download_dataset: {type: bool, default: true}
-    command: "python modelling.py --data_path {data_path} --use_dagshub {use_dagshub} --experiment_name {experiment_name} --model_name {model_name} --max_depth {max_depth} --n_estimators {n_estimators} --min_samples_split {min_samples_split} --min_samples_leaf {min_samples_leaf}"
-
+    command: "python modelling_tuning.py --use_dagshub {use_dagshub}"
+  
   train:
     parameters:
-      data_path: {type: string, default: "diabetes_preprocessed.csv"}
       use_dagshub: {type: bool, default: true}
-      experiment_name: {type: string, default: "CI_Training"}
-      download_dataset: {type: bool, default: true}
-    command: "python modelling.py --data_path {data_path} --use_dagshub {use_dagshub} --experiment_name {experiment_name}"
-
-  download_data:
+    command: "python modelling_tuning.py --use_dagshub {use_dagshub}"
+  
+  serve:
     parameters:
-      output_path: {type: string, default: "diabetes_preprocessed.csv"}
-      force: {type: bool, default: false}
-    command: "python download_dataset.py"
-
-  build_docker:
-    parameters:
-      model_uri: {type: string}
-      image_name: {type: string, default: "diabetes-prediction-model"}
-    command: "mlflow models build-docker -m {model_uri} -n {image_name} --enable-mlserver"
+      model_path: {type: str, default: "saved_models"}
+      port: {type: int, default: 5000}
+    command: "mlflow models serve -m {model_path} -p {port} -h 0.0.0.0"

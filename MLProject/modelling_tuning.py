@@ -1,7 +1,5 @@
 import pandas as pd
 import numpy as np
-import argparse
-import sys
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
@@ -15,29 +13,8 @@ import seaborn as sns
 from datetime import datetime
 import warnings
 import os
+import argparse
 warnings.filterwarnings('ignore')
-
-def parse_arguments():
-    """Parse command line arguments for MLflow Project"""
-    parser = argparse.ArgumentParser(description='Train diabetes prediction model')
-    parser.add_argument('--data_path', type=str, default='diabetes_preprocessed.csv',
-                      help='Path to the preprocessed dataset')
-    parser.add_argument('--use_dagshub', type=str, default='true',
-                      help='Whether to use DagsHub MLflow tracking')
-    parser.add_argument('--experiment_name', type=str, default='CI_Auto_Training',
-                      help='Name of the MLflow experiment')
-    parser.add_argument('--model_name', type=str, default='diabetes_rf_model',
-                      help='Name for the saved model')
-    parser.add_argument('--max_depth', type=int, default=20,
-                      help='Maximum depth for Random Forest')
-    parser.add_argument('--n_estimators', type=int, default=200,
-                      help='Number of estimators for Random Forest')
-    parser.add_argument('--min_samples_split', type=int, default=5,
-                      help='Minimum samples required to split a node')
-    parser.add_argument('--min_samples_leaf', type=int, default=2,
-                      help='Minimum samples required at a leaf node')
-    
-    return parser.parse_args()
 
 def setup_dagshub_mlflow():
     """Setup DagsHub and MLflow with proper authentication"""
@@ -98,62 +75,37 @@ def setup_experiment(experiment_name):
         print(f"❌ Error setting up experiment: {e}")
         raise
 
-def download_dataset_if_needed(data_path):
-    """Download dataset from GitHub releases if not present locally"""
-    if not os.path.exists(data_path):
-        print(f"📥 Dataset not found at {data_path}, downloading from GitHub releases...")
-        
-        # GitHub releases URL for the dataset
-        dataset_url = "https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv"
-        
+def download_dataset():
+    """Download dataset if not exists"""
+    dataset_path = 'diabetes_preprocessed.csv'
+    
+    if not os.path.exists(dataset_path):
+        print("📥 Dataset not found locally, downloading...")
         try:
-            import urllib.request
+            import requests
+            url = "https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv"
+            response = requests.get(url)
+            response.raise_for_status()
             
-            print(f"🔄 Downloading from: {dataset_url}")
-            urllib.request.urlretrieve(dataset_url, data_path)
-            print(f"✅ Dataset downloaded successfully to: {data_path}")
-            
-            # Validate downloaded file
-            if os.path.exists(data_path) and os.path.getsize(data_path) > 0:
-                print(f"📊 Downloaded file size: {os.path.getsize(data_path)} bytes")
-                return True
-            else:
-                print(f"❌ Downloaded file is invalid or empty")
-                return False
-                
+            with open(dataset_path, 'wb') as f:
+                f.write(response.content)
+            print(f"✅ Dataset downloaded successfully to {dataset_path}")
         except Exception as e:
-            print(f"❌ Failed to download dataset: {e}")
-            print("Please ensure the dataset URL is accessible and try again")
-            return False
+            print(f"❌ Error downloading dataset: {e}")
+            raise
     else:
-        print(f"✅ Dataset found at: {data_path}")
-        return True
+        print(f"✅ Dataset found at {dataset_path}")
+    
+    return dataset_path
 
-def load_and_prepare_data(data_path):
-    """Load preprocessed data with automatic download if needed"""
+def load_and_prepare_data():
+    """Load preprocessed data"""
     try:
-        # Download dataset if not present
-        if not download_dataset_if_needed(data_path):
-            raise FileNotFoundError(f"Could not obtain dataset: {data_path}")
+        # Download dataset if needed
+        dataset_path = download_dataset()
         
-        if not os.path.exists(data_path):
-            print(f"❌ Error: '{data_path}' not found")
-            print(f"Current directory: {os.getcwd()}")
-            print(f"Files in current directory: {os.listdir('.')}")
-            raise FileNotFoundError(f"Dataset file not found: {data_path}")
-        
-        print(f"📊 Loading dataset from: {data_path}")
-        df = pd.read_csv(data_path)
+        df = pd.read_csv(dataset_path)
         print(f"✅ Data loaded successfully: {df.shape}")
-        
-        # Validate dataset structure
-        required_columns = ['Diabetes_binary']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        
-        if missing_columns:
-            print(f"❌ Missing required columns: {missing_columns}")
-            print(f"Available columns: {list(df.columns)}")
-            raise ValueError(f"Dataset missing required columns: {missing_columns}")
         
         # Pisahkan features dan target
         X = df.drop('Diabetes_binary', axis=1)
@@ -161,12 +113,11 @@ def load_and_prepare_data(data_path):
         
         print(f"✅ Features: {X.shape[1]}, Samples: {len(X)}")
         print(f"✅ Target distribution: {y.value_counts().to_dict()}")
-        print(f"📋 Feature columns: {list(X.columns)[:10]}{'...' if len(X.columns) > 10 else ''}")
         
         return train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
         
     except FileNotFoundError:
-        print(f"❌ Error: '{data_path}' not found")
+        print("❌ Error: 'diabetes_preprocessed.csv' not found")
         print("Please make sure the file exists in the current directory")
         raise
     except Exception as e:
@@ -183,7 +134,7 @@ def calculate_additional_metrics(y_true, y_pred, y_pred_proba=None):
     metrics['recall_weighted'] = recall_score(y_true, y_pred, average='weighted', zero_division=0)
     metrics['f1_weighted'] = f1_score(y_true, y_pred, average='weighted', zero_division=0)
     
-    # Additional metrics
+    # Additional metrics for Advance (4 pts)
     metrics['precision_macro'] = precision_score(y_true, y_pred, average='macro', zero_division=0)
     metrics['recall_macro'] = recall_score(y_true, y_pred, average='macro', zero_division=0)
     metrics['f1_macro'] = f1_score(y_true, y_pred, average='macro', zero_division=0)
@@ -286,10 +237,10 @@ def save_model_locally(model, model_name="random_forest"):
         print(f"❌ Error saving model locally: {e}")
         return None
 
-def log_model_safely(model, X_train, model_name="diabetes_rf_model", use_dagshub=True):
+def log_model_safely(model, X_train, use_dagshub=True):
     """Safely log model to MLflow with multiple fallback strategies"""
     model_logged = False
-    model_uri = None
+    model_path = None
     
     # Strategy 1: Try standard mlflow.sklearn.log_model
     if not model_logged:
@@ -299,14 +250,14 @@ def log_model_safely(model, X_train, model_name="diabetes_rf_model", use_dagshub
             
             model_info = mlflow.sklearn.log_model(
                 sk_model=model,
-                artifact_path="model",
+                artifact_path="best_model",
                 input_example=input_example,
                 registered_model_name=None
             )
             print(f"✅ Model logged successfully with standard method!")
             print(f"   Model URI: {model_info.model_uri}")
             model_logged = True
-            model_uri = model_info.model_uri
+            model_path = model_info.model_uri
             
         except Exception as e:
             print(f"⚠️  Standard model logging failed: {e}")
@@ -317,13 +268,13 @@ def log_model_safely(model, X_train, model_name="diabetes_rf_model", use_dagshub
             print("🔄 Attempting to log model without input_example...")
             model_info = mlflow.sklearn.log_model(
                 sk_model=model,
-                artifact_path="model",
+                artifact_path="best_model",
                 registered_model_name=None
             )
             print(f"✅ Model logged successfully without input_example!")
             print(f"   Model URI: {model_info.model_uri}")
             model_logged = True
-            model_uri = model_info.model_uri
+            model_path = model_info.model_uri
             
         except Exception as e:
             print(f"⚠️  Model logging without input_example failed: {e}")
@@ -334,7 +285,7 @@ def log_model_safely(model, X_train, model_name="diabetes_rf_model", use_dagshub
             print("🔄 Attempting to log model as pickle artifact...")
             
             # Save model temporarily as pickle
-            temp_model_path = f"temp_{model_name}.pkl"
+            temp_model_path = "best_model.pkl"
             joblib.dump(model, temp_model_path)
             
             # Log as artifact
@@ -353,20 +304,17 @@ def log_model_safely(model, X_train, model_name="diabetes_rf_model", use_dagshub
     # Strategy 4: Save locally only
     if not model_logged:
         print("🔄 All MLflow model logging methods failed, saving locally only...")
-        local_path = save_model_locally(model, model_name)
+        local_path = save_model_locally(model, "advanced_random_forest")
         if local_path:
             print("✅ Model saved locally as fallback")
-            model_uri = local_path
+            model_path = local_path
     
-    return model_logged, model_uri
+    return model_logged, model_path
 
-def train_model_with_parameters(args):
-    """Train model with specified parameters from command line"""
+def train_model_with_tuning(use_dagshub=True, n_estimators_override=None, max_depth_override=None):
+    """Train model with hyperparameter tuning and robust model logging"""
     
     try:
-        # Convert string to boolean for use_dagshub
-        use_dagshub = args.use_dagshub.lower() == 'true'
-        
         # Setup tracking - try DagsHub first, fallback to local
         if use_dagshub and setup_dagshub_mlflow():
             print("✅ Using DagsHub MLflow tracking")
@@ -375,52 +323,95 @@ def train_model_with_parameters(args):
             setup_local_mlflow()
         
         # Load data
-        X_train, X_test, y_train, y_test = load_and_prepare_data(args.data_path)
+        X_train, X_test, y_train, y_test = load_and_prepare_data()
         feature_names = X_train.columns.tolist() if hasattr(X_train, 'columns') else None
         
-        # Create experiment
-        experiment_id = setup_experiment(args.experiment_name)
+        # Create experiment with a fixed name (not timestamp-based)
+        experiment_name = "CI_Auto_Training"
+        experiment_id = setup_experiment(experiment_name)
         
         # Disable autolog to prevent duplicate models
         mlflow.sklearn.autolog(disable=True)
         
-        with mlflow.start_run(experiment_id=experiment_id, run_name=f"CI_Training_{datetime.now().strftime('%H%M%S')}") as run:
+        with mlflow.start_run(experiment_id=experiment_id, run_name=f"RandomForest_Advanced_Tuning_{datetime.now().strftime('%H%M%S')}") as run:
             print(f"✅ Started MLflow run: {run.info.run_id}")
             print(f"✅ Experiment ID: {run.info.experiment_id}")
             
-            # Create model with specified parameters
-            model = RandomForestClassifier(
-                n_estimators=args.n_estimators,
-                max_depth=args.max_depth,
-                min_samples_split=args.min_samples_split,
-                min_samples_leaf=args.min_samples_leaf,
-                random_state=42
-            )
+            # Hyperparameter tuning
+            if n_estimators_override or max_depth_override:
+                # Use provided parameters instead of grid search
+                print("🔧 Using provided hyperparameters instead of grid search...")
+                best_model = RandomForestClassifier(
+                    n_estimators=n_estimators_override or 200,
+                    max_depth=max_depth_override or 20,
+                    min_samples_split=2,
+                    min_samples_leaf=1,
+                    random_state=42
+                )
+                best_model.fit(X_train, y_train)
+                best_score = best_model.score(X_train, y_train)
+                
+                # Log the used parameters
+                mlflow.log_param("n_estimators", n_estimators_override or 200)
+                mlflow.log_param("max_depth", max_depth_override or 20)
+                mlflow.log_param("min_samples_split", 2)
+                mlflow.log_param("min_samples_leaf", 1)
+                mlflow.log_param("hyperparameter_method", "provided_parameters")
+                
+            else:
+                # Use grid search as before
+                param_grid = {
+                    'n_estimators': [100, 200, 300],
+                    'max_depth': [10, 20, None],
+                    'min_samples_split': [2, 5, 10],
+                    'min_samples_leaf': [1, 2, 4]
+                }
+                
+                # Log hyperparameter grid
+                mlflow.log_params({
+                    "param_grid_n_estimators": str(param_grid['n_estimators']),
+                    "param_grid_max_depth": str(param_grid['max_depth']),
+                    "param_grid_min_samples_split": str(param_grid['min_samples_split']),
+                    "param_grid_min_samples_leaf": str(param_grid['min_samples_leaf']),
+                    "hyperparameter_method": "grid_search"
+                })
+                
+                # Grid Search
+                rf = RandomForestClassifier(random_state=42)
+                grid_search = GridSearchCV(
+                    rf, param_grid, cv=3, scoring='accuracy', 
+                    n_jobs=-1, verbose=1
+                )
+                
+                print("🔄 Starting hyperparameter tuning...")
+                grid_search.fit(X_train, y_train)
+                print("✅ Hyperparameter tuning completed")
+                
+                # Best model
+                best_model = grid_search.best_estimator_
+                best_score = grid_search.best_score_
+                
+                # Log best parameters
+                for param_name, param_value in grid_search.best_params_.items():
+                    mlflow.log_param(f"best_{param_name}", param_value)
             
-            # Log hyperparameters
+            mlflow.log_metric("best_cv_score", best_score)
+            
+            # Log common parameters
             mlflow.log_params({
-                "n_estimators": args.n_estimators,
-                "max_depth": args.max_depth,
-                "min_samples_split": args.min_samples_split,
-                "min_samples_leaf": args.min_samples_leaf,
+                "cv_folds": 3,
+                "scoring": "accuracy",
                 "model_type": "RandomForestClassifier",
                 "train_size": len(X_train),
                 "test_size": len(X_test),
                 "n_features": len(X_train.columns) if hasattr(X_train, 'columns') else X_train.shape[1],
-                "data_path": args.data_path,
-                "model_name": args.model_name,
                 "timestamp": datetime.now().isoformat()
             })
             
-            # Train model
-            print("🔄 Training model...")
-            model.fit(X_train, y_train)
-            print("✅ Model training completed")
-            
             # Make predictions
             print("🔄 Making predictions...")
-            y_pred = model.predict(X_test)
-            y_pred_proba = model.predict_proba(X_test)
+            y_pred = best_model.predict(X_test)
+            y_pred_proba = best_model.predict_proba(X_test)
             
             # Calculate all metrics
             metrics = calculate_additional_metrics(y_test, y_pred, y_pred_proba)
@@ -433,7 +424,7 @@ def train_model_with_parameters(args):
             
             # Cross-validation scores
             try:
-                cv_scores = cross_val_score(model, X_train, y_train, cv=3)
+                cv_scores = cross_val_score(best_model, X_train, y_train, cv=3)
                 mlflow.log_metric("cv_mean", float(cv_scores.mean()))
                 mlflow.log_metric("cv_std", float(cv_scores.std()))
                 mlflow.log_metric("cv_min", float(cv_scores.min()))
@@ -445,7 +436,7 @@ def train_model_with_parameters(args):
             print("🔄 Creating visualizations...")
             
             # Feature importance plot
-            fi_path = create_feature_importance_plot(model, feature_names, args.model_name)
+            fi_path = create_feature_importance_plot(best_model, feature_names, "Advanced Random Forest")
             if fi_path and os.path.exists(fi_path):
                 try:
                     mlflow.log_artifact(fi_path)
@@ -454,7 +445,7 @@ def train_model_with_parameters(args):
                     print(f"⚠️  Warning: Could not log feature importance to MLflow: {e}")
             
             # Confusion matrix
-            cm_path = create_confusion_matrix_plot(y_test, y_pred, args.model_name)
+            cm_path = create_confusion_matrix_plot(y_test, y_pred, "Advanced Random Forest")
             if cm_path and os.path.exists(cm_path):
                 try:
                     mlflow.log_artifact(cm_path)
@@ -466,7 +457,7 @@ def train_model_with_parameters(args):
             try:
                 report = classification_report(y_test, y_pred)
                 os.makedirs('artifacts', exist_ok=True)
-                report_path = f'artifacts/classification_report_{args.model_name}.txt'
+                report_path = 'artifacts/classification_report_advanced.txt'
                 with open(report_path, 'w') as f:
                     f.write(report)
                 mlflow.log_artifact(report_path)
@@ -476,36 +467,37 @@ def train_model_with_parameters(args):
             
             # Log model with multiple fallback strategies
             print("🔄 Logging model to MLflow...")
-            model_logged, model_uri = log_model_safely(model, X_train, args.model_name, use_dagshub)
+            model_logged, model_path = log_model_safely(best_model, X_train, use_dagshub)
             
             if not model_logged:
                 print("❌ All model logging strategies failed!")
                 # Save locally as final fallback
-                local_path = save_model_locally(model, f"final_fallback_{args.model_name}")
+                local_path = save_model_locally(best_model, "final_fallback_random_forest")
                 if local_path:
-                    model_uri = local_path
+                    model_path = local_path
             
-            # Log model URI for Docker building
-            if model_uri:
-                mlflow.log_param("model_uri", model_uri)
-                # Save model URI to file for GitHub Actions
-                with open("model_uri.txt", "w") as f:
-                    f.write(model_uri)
-                print(f"✅ Model URI saved to file: {model_uri}")
+            # Log model path as a parameter for reference
+            if model_path:
+                mlflow.log_param("model_save_path", model_path)
             
             # Print summary
             print("\n" + "="*60)
-            print("🎉 CI TRAINING COMPLETED SUCCESSFULLY!")
+            print("🎉 TRAINING COMPLETED SUCCESSFULLY!")
             print("="*60)
-            print(f"Model parameters: n_estimators={args.n_estimators}, max_depth={args.max_depth}")
+            if n_estimators_override or max_depth_override:
+                print(f"Used parameters: n_estimators={n_estimators_override or 200}, max_depth={max_depth_override or 20}")
+                print(f"Training score: {best_score:.4f}")
+            else:
+                print(f"Best parameters: {grid_search.best_params_}")
+                print(f"Best cross-validation score: {best_score:.4f}")
             print(f"Test accuracy: {metrics['accuracy']:.4f}")
             print(f"MLflow Run ID: {run.info.run_id}")
-            if model_uri:
-                print(f"Model URI: {model_uri}")
+            if model_path:
+                print(f"Model saved at: {model_path}")
             
             # Check if we can get experiment info
             try:
-                experiment = mlflow.get_experiment_by_name(args.experiment_name)
+                experiment = mlflow.get_experiment_by_name(experiment_name)
                 if experiment:
                     print(f"Experiment ID: {experiment.experiment_id}")
                     if use_dagshub:
@@ -517,44 +509,46 @@ def train_model_with_parameters(args):
             
             print("="*60)
             
-            return model, metrics, run.info.run_id, model_uri
+            return best_model, metrics, run.info.run_id
             
     except Exception as e:
         print(f"❌ Error during training: {e}")
         import traceback
         traceback.print_exc()
-        sys.exit(1)
+        raise e
 
 if __name__ == "__main__":
-    print("🚀 Starting CI MLflow Training...")
+    parser = argparse.ArgumentParser(description='Train diabetes prediction model')
+    parser.add_argument('--use_dagshub', type=str, default='true', 
+                       help='Use DagsHub for MLflow tracking (true/false)')
+    parser.add_argument('--n_estimators', type=int, default=None,
+                       help='Number of estimators for RandomForest (overrides grid search)')
+    parser.add_argument('--max_depth', type=int, default=None,
+                       help='Max depth for RandomForest (overrides grid search)')
+    
+    args = parser.parse_args()
+    
+    print("🚀 Starting Advanced MLflow Training...")
     print("="*60)
     
-    # Parse command line arguments
-    args = parse_arguments()
-    
-    print(f"📋 Training Configuration:")
-    print(f"   Data Path: {args.data_path}")
-    print(f"   Use DagsHub: {args.use_dagshub}")
-    print(f"   Experiment: {args.experiment_name}")
-    print(f"   Model Name: {args.model_name}")
-    print(f"   Parameters: n_estimators={args.n_estimators}, max_depth={args.max_depth}")
-    print("="*60)
+    # Convert string to boolean
+    USE_DAGSHUB = args.use_dagshub.lower() in ['true', '1', 'yes', 'on']
     
     try:
-        model, metrics, run_id, model_uri = train_model_with_parameters(args)
-        print("\n✅ CI Training completed successfully!")
+        model, metrics, run_id = train_model_with_tuning(
+            use_dagshub=USE_DAGSHUB,
+            n_estimators_override=args.n_estimators,
+            max_depth_override=args.max_depth
+        )
+        print("\n✅ Training completed successfully!")
         
-        if args.use_dagshub.lower() == 'true':
+        if USE_DAGSHUB:
             print("🔗 Check your DagsHub repository for MLflow tracking results:")
             print("   https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow")
         else:
             print("🔗 Check your local MLflow UI:")
             print("   Run 'mlflow ui' in terminal and go to http://localhost:5000")
         
-        # Exit with success code
-        sys.exit(0)
-        
     except Exception as e:
-        print(f"\n❌ CI Training failed: {e}")
+        print(f"\n❌ Training failed: {e}")
         print("Please check your data path, column names, and authentication.")
-        sys.exit(1)

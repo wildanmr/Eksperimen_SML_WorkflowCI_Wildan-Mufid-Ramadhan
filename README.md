@@ -1,6 +1,14 @@
-# 🩺 Diabetes Prediction MLflow CI/CD Pipeline
+# Diabetes Prediction ML Pipeline
+Advance automated ML pipeline for diabetes prediction using MLflow, GitHub Actions, and Docker Hub.
 
-Advanced CI/CD pipeline for automated diabetes prediction model training, deployment, and Docker containerization using MLflow Projects and GitHub Actions.
+## 🎯 Features
+
+* ✅ **Automated model training** with hyperparameter tuning using RandomForest
+* ✅ **MLflow tracking** with DagsHub integration
+* ✅ **GitHub Actions CI/CD pipeline** for automated training
+* ✅ **Docker containerization** with MLflow model serving
+* ✅ **Artifact storage** via GitHub Actions and Docker Hub
+* ✅ **Advanced metrics** calculation and visualization
 
 ## 📁 Project Structure
 
@@ -8,102 +16,52 @@ Advanced CI/CD pipeline for automated diabetes prediction model training, deploy
 Workflow-CI/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                    # GitHub Actions CI/CD workflow
+│       └── ml-pipeline.yml          # GitHub Actions workflow
 ├── MLProject/
-│   ├── modelling.py                  # Updated ML training script with CLI args
-│   ├── conda.yaml                    # Environment dependencies
-│   ├── MLProject                     # MLflow project configuration
-│   ├── predict.py                    # Model serving script
-│   ├── Dockerfile                    # Docker configuration
-│   ├── diabetes_preprocessed.csv     # Preprocessed dataset
-│   └── RUN_SUMMARY.md               # Auto-updated run summaries
-└── README.md                        # This file
+│   ├── MLproject                    # MLflow project config
+│   ├── conda.yaml                   # Conda environment
+│   ├── modelling.py                 # Main training script
+│   ├── requirements.txt            # Python dependencies
+│   └── Dockerfile                  # Docker configuration
+├── README.md
+└── .gitignore
 ```
 
-## 🐳 Docker Usage
+## 🔄 CI/CD Pipeline
 
-### Pull and Run Model Container
+### Pipeline Steps:
+
+1. **Model Training**: Hyperparameter tuning with GridSearch
+2. **Metrics Calculation**: Advanced metrics and visualizations
+3. **MLflow Logging**: Model, metrics, and artifacts to DagsHub
+4. **Artifact Storage**: Upload to GitHub Actions artifacts
+5. **Docker Build**: Build and push to Docker Hub
+6. **MLflow Docker**: Build serving image using `mlflow build-docker`
+
+## 📈 Monitoring
+
+* **MLflow UI**: [https://dagshub.com/wildanmr/SMSML\_Wildan-Mufid-Ramadhan.mlflow](https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow)
+* **GitHub Actions**: Repository > Actions tab
+* **Docker Images**: Docker Hub repository
+
+## 🐳 Docker Images
+
+Once the pipeline completes, the following Docker images are available:
+
+* `<username>/diabetes-ml-model:latest` - Standard training image
+* `<username>/diabetes-ml-model:<build-number>` - Versioned training image
+* `<username>/diabetes-ml-mlflow:latest` - MLflow serving image
+
+### Run Serving Container
 
 ```bash
-# Pull the image
-docker pull wildanmr/diabetes-prediction-model:latest
-
-# Run the container
-docker run -p 8080:8080 wildanmr/diabetes-prediction-model:latest
+docker pull <username>/diabetes-ml-mlflow:latest
+docker run -p 5000:5000 <username>/diabetes-ml-mlflow:latest
 ```
 
-### API Endpoints
+## 📋 Model Details
 
-Once running, access these endpoints:
-
-- **`http://localhost:8080/`** - Information page
-- **`http://localhost:8080/health`** - Health check
-- **`http://localhost:8080/info`** - Model information
-- **`http://localhost:8080/predict`** - Make predictions
-
-### Example Prediction Request
-
-**GET Request:**
-```
-http://localhost:8080/predict?HighBP=1&HighChol=0&CholCheck=1&BMI=25.5&Smoker=0&Stroke=0&HeartDiseaseorAttack=0&PhysActivity=1&Fruits=1&Veggies=1&HvyAlcoholConsump=0&AnyHealthcare=1&NoDocbcCost=0&GenHlth=2&MentHlth=5&PhysHlth=0&DiffWalk=0&Sex=1&Age=8&Education=6&Income=7
-```
-
-**POST Request:**
-```bash
-curl -X POST http://localhost:8080/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "HighBP": 1,
-    "HighChol": 0,
-    "CholCheck": 1,
-    "BMI": 25.5,
-    "Smoker": 0,
-    "Stroke": 0,
-    "HeartDiseaseorAttack": 0,
-    "PhysActivity": 1,
-    "Fruits": 1,
-    "Veggies": 1,
-    "HvyAlcoholConsump": 0,
-    "AnyHealthcare": 1,
-    "NoDocbcCost": 0,
-    "GenHlth": 2,
-    "MentHlth": 5,
-    "PhysHlth": 0,
-    "DiffWalk": 0,
-    "Sex": 1,
-    "Age": 8,
-    "Education": 6,
-    "Income": 7
-  }'
-```
-
-**Response:**
-```json
-{
-  "prediction": 0,
-  "prediction_label": "No Diabetes",
-  "probability": {
-    "no_diabetes": 0.85,
-    "diabetes": 0.15
-  },
-  "confidence": 0.85,
-  "features_used": 21,
-  "missing_features": [],
-  "timestamp": "2025-06-24T10:30:00.000Z"
-}
-```
-
-## 🔧 Customization
-
-### Modify Training Parameters
-
-Edit the workflow file (`.github/workflows/ci.yml`) to change default parameters:
-
-```yaml
-workflow_dispatch:
-  inputs:
-    n_estimators:
-      default: '300'  # Change default value
-    max_depth:
-      default: '25'   # Change default value
-```
+* **Algorithm**: Random Forest Classifier
+* **Hyperparameters**: Grid search over n\_estimators, max\_depth, min\_samples\_split, min\_samples\_leaf
+* **Dataset**: Diabetes dataset (automatically downloaded from GitHub releases)
+* **Metrics**: Accuracy, Precision, Recall, F1-score (weighted, macro, micro), ROC-AUC, Log Loss
