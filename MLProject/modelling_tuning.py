@@ -12,18 +12,28 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 import warnings
+import sys
 import os
-import argparse
 warnings.filterwarnings('ignore')
 
 def setup_dagshub_mlflow():
     """Setup DagsHub and MLflow with proper authentication"""
     try:
-        # Initialize DagsHub
-        dagshub.init(repo_owner="wildanmr", repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
+        # Get credentials from environment variables (set by GitHub Actions)
+        dagshub_token = os.getenv('DAGSHUB_TOKEN')
+        dagshub_username = os.getenv('DAGSHUB_USERNAME', 'wildanmr')
         
-        # Set tracking URI
-        tracking_uri = "https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
+        if dagshub_token:
+            os.environ['DAGSHUB_USER_TOKEN'] = dagshub_token
+            os.environ['MLFLOW_TRACKING_USERNAME'] = dagshub_username
+            os.environ['MLFLOW_TRACKING_PASSWORD'] = dagshub_token
+            print(f"✅ DagsHub credentials configured from environment")
+        
+        # Initialize DagsHub
+        dagshub.init(repo_owner=dagshub_username, repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
+        
+        # Set tracking URI from environment or default
+        tracking_uri = os.getenv('MLFLOW_TRACKING_URI', f"https://dagshub.com/{dagshub_username}/SMSML_Wildan-Mufid-Ramadhan.mlflow")
         mlflow.set_tracking_uri(tracking_uri)
         
         # Test connection
@@ -33,13 +43,11 @@ def setup_dagshub_mlflow():
             print(f"✅ Found {len(experiments)} existing experiments")
         except Exception as e:
             print(f"⚠️  Warning: Could not list experiments: {e}")
-            print("Make sure you're authenticated with DagsHub")
         
         return True
         
     except Exception as e:
         print(f"❌ Error setting up DagsHub/MLflow: {e}")
-        print("Please check your DagsHub credentials and repository access")
         return False
 
 def setup_local_mlflow():
@@ -75,36 +83,10 @@ def setup_experiment(experiment_name):
         print(f"❌ Error setting up experiment: {e}")
         raise
 
-def download_dataset():
-    """Download dataset if not exists"""
-    dataset_path = 'diabetes_preprocessed.csv'
-    
-    if not os.path.exists(dataset_path):
-        print("📥 Dataset not found locally, downloading...")
-        try:
-            import requests
-            url = "https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv"
-            response = requests.get(url)
-            response.raise_for_status()
-            
-            with open(dataset_path, 'wb') as f:
-                f.write(response.content)
-            print(f"✅ Dataset downloaded successfully to {dataset_path}")
-        except Exception as e:
-            print(f"❌ Error downloading dataset: {e}")
-            raise
-    else:
-        print(f"✅ Dataset found at {dataset_path}")
-    
-    return dataset_path
-
 def load_and_prepare_data():
     """Load preprocessed data"""
     try:
-        # Download dataset if needed
-        dataset_path = download_dataset()
-        
-        df = pd.read_csv(dataset_path)
+        df = pd.read_csv('diabetes_preprocessed.csv')
         print(f"✅ Data loaded successfully: {df.shape}")
         
         # Pisahkan features dan target
@@ -311,11 +293,11 @@ def log_model_safely(model, X_train, use_dagshub=True):
     
     return model_logged, model_path
 
-def train_model_with_tuning(use_dagshub=True, n_estimators_override=None, max_depth_override=None):
+def train_model_with_tuning(use_dagshub=True):
     """Train model with hyperparameter tuning and robust model logging"""
     
     try:
-        # Setup tracking - try DagsHub first, fallback to local
+        # Setup tracking
         if use_dagshub and setup_dagshub_mlflow():
             print("✅ Using DagsHub MLflow tracking")
         else:
@@ -326,7 +308,7 @@ def train_model_with_tuning(use_dagshub=True, n_estimators_override=None, max_de
         X_train, X_test, y_train, y_test = load_and_prepare_data()
         feature_names = X_train.columns.tolist() if hasattr(X_train, 'columns') else None
         
-        # Create experiment with a fixed name (not timestamp-based)
+        # Create experiment
         experiment_name = "CI_Auto_Training"
         experiment_id = setup_experiment(experiment_name)
         
@@ -335,70 +317,22 @@ def train_model_with_tuning(use_dagshub=True, n_estimators_override=None, max_de
         
         with mlflow.start_run(experiment_id=experiment_id, run_name=f"RandomForest_Advanced_Tuning_{datetime.now().strftime('%H%M%S')}") as run:
             print(f"✅ Started MLflow run: {run.info.run_id}")
-            print(f"✅ Experiment ID: {run.info.experiment_id}")
+            print(f"Run ID: {run.info.run_id}")
             
             # Hyperparameter tuning
-            if n_estimators_override or max_depth_override:
-                # Use provided parameters instead of grid search
-                print("🔧 Using provided hyperparameters instead of grid search...")
-                best_model = RandomForestClassifier(
-                    n_estimators=n_estimators_override or 200,
-                    max_depth=max_depth_override or 20,
-                    min_samples_split=2,
-                    min_samples_leaf=1,
-                    random_state=42
-                )
-                best_model.fit(X_train, y_train)
-                best_score = best_model.score(X_train, y_train)
-                
-                # Log the used parameters
-                mlflow.log_param("n_estimators", n_estimators_override or 200)
-                mlflow.log_param("max_depth", max_depth_override or 20)
-                mlflow.log_param("min_samples_split", 2)
-                mlflow.log_param("min_samples_leaf", 1)
-                mlflow.log_param("hyperparameter_method", "provided_parameters")
-                
-            else:
-                # Use grid search as before
-                param_grid = {
-                    'n_estimators': [100, 200, 300],
-                    'max_depth': [10, 20, None],
-                    'min_samples_split': [2, 5, 10],
-                    'min_samples_leaf': [1, 2, 4]
-                }
-                
-                # Log hyperparameter grid
-                mlflow.log_params({
-                    "param_grid_n_estimators": str(param_grid['n_estimators']),
-                    "param_grid_max_depth": str(param_grid['max_depth']),
-                    "param_grid_min_samples_split": str(param_grid['min_samples_split']),
-                    "param_grid_min_samples_leaf": str(param_grid['min_samples_leaf']),
-                    "hyperparameter_method": "grid_search"
-                })
-                
-                # Grid Search
-                rf = RandomForestClassifier(random_state=42)
-                grid_search = GridSearchCV(
-                    rf, param_grid, cv=3, scoring='accuracy', 
-                    n_jobs=-1, verbose=1
-                )
-                
-                print("🔄 Starting hyperparameter tuning...")
-                grid_search.fit(X_train, y_train)
-                print("✅ Hyperparameter tuning completed")
-                
-                # Best model
-                best_model = grid_search.best_estimator_
-                best_score = grid_search.best_score_
-                
-                # Log best parameters
-                for param_name, param_value in grid_search.best_params_.items():
-                    mlflow.log_param(f"best_{param_name}", param_value)
+            param_grid = {
+                'n_estimators': [100, 200, 300],
+                'max_depth': [10, 20, None],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4]
+            }
             
-            mlflow.log_metric("best_cv_score", best_score)
-            
-            # Log common parameters
+            # Log hyperparameter grid
             mlflow.log_params({
+                "param_grid_n_estimators": str(param_grid['n_estimators']),
+                "param_grid_max_depth": str(param_grid['max_depth']),
+                "param_grid_min_samples_split": str(param_grid['min_samples_split']),
+                "param_grid_min_samples_leaf": str(param_grid['min_samples_leaf']),
                 "cv_folds": 3,
                 "scoring": "accuracy",
                 "model_type": "RandomForestClassifier",
@@ -407,6 +341,26 @@ def train_model_with_tuning(use_dagshub=True, n_estimators_override=None, max_de
                 "n_features": len(X_train.columns) if hasattr(X_train, 'columns') else X_train.shape[1],
                 "timestamp": datetime.now().isoformat()
             })
+            
+            # Grid Search
+            rf = RandomForestClassifier(random_state=42)
+            grid_search = GridSearchCV(
+                rf, param_grid, cv=3, scoring='accuracy', 
+                n_jobs=-1, verbose=1
+            )
+            
+            print("🔄 Starting hyperparameter tuning...")
+            grid_search.fit(X_train, y_train)
+            print("✅ Hyperparameter tuning completed")
+            
+            # Best model
+            best_model = grid_search.best_estimator_
+            
+            # Log best parameters
+            for param_name, param_value in grid_search.best_params_.items():
+                mlflow.log_param(f"best_{param_name}", param_value)
+            
+            mlflow.log_metric("best_cv_score", grid_search.best_score_)
             
             # Make predictions
             print("🔄 Making predictions...")
@@ -484,12 +438,8 @@ def train_model_with_tuning(use_dagshub=True, n_estimators_override=None, max_de
             print("\n" + "="*60)
             print("🎉 TRAINING COMPLETED SUCCESSFULLY!")
             print("="*60)
-            if n_estimators_override or max_depth_override:
-                print(f"Used parameters: n_estimators={n_estimators_override or 200}, max_depth={max_depth_override or 20}")
-                print(f"Training score: {best_score:.4f}")
-            else:
-                print(f"Best parameters: {grid_search.best_params_}")
-                print(f"Best cross-validation score: {best_score:.4f}")
+            print(f"Best parameters: {grid_search.best_params_}")
+            print(f"Best cross-validation score: {grid_search.best_score_:.4f}")
             print(f"Test accuracy: {metrics['accuracy']:.4f}")
             print(f"MLflow Run ID: {run.info.run_id}")
             if model_path:
@@ -518,37 +468,20 @@ def train_model_with_tuning(use_dagshub=True, n_estimators_override=None, max_de
         raise e
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Train diabetes prediction model')
-    parser.add_argument('--use_dagshub', type=str, default='true', 
-                       help='Use DagsHub for MLflow tracking (true/false)')
-    parser.add_argument('--n_estimators', type=int, default=None,
-                       help='Number of estimators for RandomForest (overrides grid search)')
-    parser.add_argument('--max_depth', type=int, default=None,
-                       help='Max depth for RandomForest (overrides grid search)')
-    
-    args = parser.parse_args()
-    
     print("🚀 Starting Advanced MLflow Training...")
     print("="*60)
     
-    # Convert string to boolean
-    USE_DAGSHUB = args.use_dagshub.lower() in ['true', '1', 'yes', 'on']
-    
     try:
-        model, metrics, run_id = train_model_with_tuning(
-            use_dagshub=USE_DAGSHUB,
-            n_estimators_override=args.n_estimators,
-            max_depth_override=args.max_depth
-        )
-        print("\n✅ Training completed successfully!")
+        model, metrics, run_id = train_model_with_tuning(use_dagshub=True)
+        print(f"\n✅ Training completed successfully! Run ID: {run_id}")
         
-        if USE_DAGSHUB:
-            print("🔗 Check your DagsHub repository for MLflow tracking results:")
-            print("   https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow")
-        else:
-            print("🔗 Check your local MLflow UI:")
-            print("   Run 'mlflow ui' in terminal and go to http://localhost:5000")
+        # Write run ID to a file for CI/CD to pick up
+        with open('run_id.txt', 'w') as f:
+            f.write(run_id)
+        
+        print("🔗 Check your DagsHub repository for MLflow tracking results:")
+        print("   https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow")
         
     except Exception as e:
         print(f"\n❌ Training failed: {e}")
-        print("Please check your data path, column names, and authentication.")
+        sys.exit(1)

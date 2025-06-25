@@ -14,14 +14,6 @@ on:
         options:
           - 'true'
           - 'false'
-      n_estimators:
-        description: 'Number of estimators (optional)'
-        required: false
-        default: ''
-      max_depth:
-        description: 'Max depth (optional)'
-        required: false
-        default: ''
 
 env:
   DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
@@ -30,380 +22,133 @@ env:
   MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
   MLFLOW_TRACKING_URI: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow
   DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
-  DOCKER_HUB_TOKEN : ${{ secrets.DOCKER_HUB_TOKEN  }}
+  DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
 
 jobs:
   train-model:
     runs-on: ubuntu-latest
-    
     outputs:
-      run-id: ${{ steps.mlflow-run.outputs.run-id }}
-      experiment-id: ${{ steps.mlflow-run.outputs.experiment-id }}
-    
-    # Use bash shell with conda initialization
-    defaults:
-      run:
+      run_id: ${{ steps.run-mlflow-project.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniconda-version: "latest"
+          python-version: "3.11"
+          auto-update-conda: true
+          auto-activate-base: false
+          environment-file: MLProject/conda.yaml
+          activate-environment: diabetes-ml-env
+
+      - name: Install dependencies
         shell: bash -l {0}
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup Miniconda
-      uses: conda-incubator/setup-miniconda@v2
-      with:
-        miniconda-version: 'latest'
-        activate-environment: diabetes-ml-env
-        environment-file: MLProject/conda.yaml
-        auto-activate-base: false
-        auto-update-conda: true
-        python-version: '3.11'
-    
-    - name: Install MLflow
-      run: |
-        conda info
-        conda list
-        # MLflow should be installed from conda.yaml, but ensure it's available
-        pip install mlflow[extras]
-        mlflow --version
-        
-    - name: Download dataset to MLProject directory
-      run: |
-        cd MLProject
-        curl -L -o diabetes_preprocessed.csv https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv
-        ls -la *.csv
-    
-    - name: Run MLflow Project with conda environment
-      id: mlflow-run
-      run: |
-        cd MLProject
-        
-        # Set parameters from workflow inputs
-        USE_DAGSHUB="${{ github.event.inputs.use_dagshub || 'true' }}"
-        N_ESTIMATORS="${{ github.event.inputs.n_estimators }}"
-        MAX_DEPTH="${{ github.event.inputs.max_depth }}"
-        
-        echo "🚀 Running MLflow Project with mlflow run..."
-        echo "📊 Tracking URI: $MLFLOW_TRACKING_URI"
-        echo "🔧 Use DagsHub: $USE_DAGSHUB"
-        echo "🌳 N Estimators: ${N_ESTIMATORS:-'default (grid search)'}"
-        echo "📏 Max Depth: ${MAX_DEPTH:-'default (grid search)'}"
-        
-        # Build mlflow run command with parameters
-        MLFLOW_CMD="mlflow run . --experiment-name 'CI_Auto_Training' -P use_dagshub=$USE_DAGSHUB --env-manager conda"
-        
-        # Add optional parameters if provided
-        if [ ! -z "$N_ESTIMATORS" ]; then
-          MLFLOW_CMD="$MLFLOW_CMD -P n_estimators=$N_ESTIMATORS"
-        fi
-        
-        if [ ! -z "$MAX_DEPTH" ]; then
-          MLFLOW_CMD="$MLFLOW_CMD -P max_depth=$MAX_DEPTH"
-        fi
-        
-        echo "📝 Command: $MLFLOW_CMD"
-        
-        # Run MLflow project with output capture
-        echo "🔄 Starting MLflow run..."
-        RUN_OUTPUT=$(eval $MLFLOW_CMD 2>&1 | tee /tmp/mlflow_output.log)
-        
-        echo "📋 MLflow Run Output:"
-        cat /tmp/mlflow_output.log
-        
-        # Extract run ID from MLflow output
-        RUN_ID=$(grep -oP "(?<=Run ID: )[a-f0-9]+" /tmp/mlflow_output.log | tail -n 1)
-        
-        # Alternative extraction method
-        if [ -z "$RUN_ID" ]; then
-          RUN_ID=$(grep -oE "[a-f0-9]{32}" /tmp/mlflow_output.log | tail -n 1)
-        fi
-        
-        # If still no run ID, try to get from MLflow API
-        if [ -z "$RUN_ID" ]; then
-          echo "🔍 Trying alternative method to get run ID..."
-          RUN_ID=$(python3 -c "
-          import mlflow
-          import os
-          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
-          try:
-              experiment = mlflow.get_experiment_by_name('CI_Auto_Training')
-              if experiment:
-                  runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=1, order_by=['start_time DESC'])
-                  if not runs.empty:
-                      run_id = runs.iloc[0]['run_id']
-                      exp_id = experiment.experiment_id
-                      print(run_id)
-                      with open('/tmp/exp_id.txt', 'w') as f:
-                          f.write(exp_id)
-                  else:
-                      print('no-run-found')
-              else:
-                  print('no-experiment-found')
-          except Exception as e:
-              print(f'error-{str(e)}')
-          ")
+        run: |
+          conda activate diabetes-ml-env
+          pip install mlflow dagshub
           
-          if [ -f "/tmp/exp_id.txt" ]; then
-            EXPERIMENT_ID=$(cat /tmp/exp_id.txt)
-          fi
-        else
-          # Try to get experiment ID
-          EXPERIMENT_ID=$(python3 -c "
-          import mlflow
-          mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
-          try:
-              experiment = mlflow.get_experiment_by_name('CI_Auto_Training')
-              if experiment:
-                  print(experiment.experiment_id)
-              else:
-                  print('no-experiment-found')
-          except Exception as e:
-              print(f'error-{str(e)}')
-          ")
-        fi
-        
-        echo "run-id=$RUN_ID" >> $GITHUB_OUTPUT
-        echo "experiment-id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
-        
-        echo "✅ MLflow run completed"
-        echo "🆔 Run ID: $RUN_ID"
-        echo "🔬 Experiment ID: $EXPERIMENT_ID"
-        
-        # Verify artifacts were created
-        if [ -d "artifacts" ]; then
-          echo "📁 Artifacts created:"
-          ls -la artifacts/
-        fi
-        
-        if [ -d "saved_models" ]; then
-          echo "💾 Models saved:"
-          ls -la saved_models/
-        fi
-    
-    - name: Upload artifacts to GitHub
-      uses: actions/upload-artifact@v4
-      with:
-        name: ml-artifacts-${{ github.run_number }}
-        path: |
-          MLProject/artifacts/
-          MLProject/saved_models/
-          MLProject/mlruns/
-        retention-days: 30
-    
-    - name: Commit artifacts back to repo
-      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add MLProject/artifacts/ MLProject/saved_models/ || true
-        git commit -m "Add ML training artifacts from mlflow run [skip ci]" || exit 0
-        git push || true
+      - name: Download dataset
+        shell: bash -l {0}
+        run: |
+          conda activate diabetes-ml-env
+          cd MLProject
+          wget -O diabetes_preprocessed.csv "https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv"
 
-  build-docker:
-    needs: train-model
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-    
-    - name: Login to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKER_HUB_USERNAME }}
-        password: ${{ secrets.DOCKER_HUB_TOKEN }}
-    
-    - name: Download dataset for Docker build
-      run: |
-        cd MLProject
-        curl -L -o diabetes_preprocessed.csv https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv
-    
-    - name: Build and push standard Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: ./MLProject
-        push: true
-        tags: |
-          ${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-model:latest
-          ${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-model:${{ github.run_number }}
-        platforms: linux/amd64,linux/arm64
-    
-    - name: Setup Miniconda for MLflow build
-      uses: conda-incubator/setup-miniconda@v2
-      with:
-        miniconda-version: 'latest'
-        activate-environment: diabetes-ml-env
-        environment-file: MLProject/conda.yaml
-        auto-activate-base: false
-        auto-update-conda: true
-        python-version: '3.11'
-    
-    - name: Install MLflow for Docker build
-      shell: bash -l {0}
-      run: |
-        conda list
-        # MLflow should be available from environment, add extras if needed
-        pip install mlflow[extras]
-    
-    - name: Build MLflow Docker image using mlflow build-docker
-      shell: bash -l {0}
-      env:
-        RUN_ID: ${{ needs.train-model.outputs.run-id }}
-        EXPERIMENT_ID: ${{ needs.train-model.outputs.experiment-id }}
-      run: |
-        echo "🐳 Building MLflow Docker image..."
-        echo "🆔 Using Run ID: $RUN_ID"
-        echo "🔬 Using Experiment ID: $EXPERIMENT_ID"
-        
-        cd MLProject
-        
-        if [ "$RUN_ID" != "" ] && [ "$RUN_ID" != "no-run-found" ] && [ "$RUN_ID" != "no-experiment-found" ] && [[ ! "$RUN_ID" =~ ^error- ]]; then
-          echo "✅ Valid run ID found, building with mlflow build-docker..."
+      - name: Run MLflow Project
+        id: run-mlflow-project
+        shell: bash -l {0}
+        run: |
+          conda activate diabetes-ml-env
+          cd MLProject
+          RUN_OUTPUT=$(mlflow run . --no-conda 2>&1)
+          echo "$RUN_OUTPUT"
           
-          # Set MLflow tracking URI for docker build
-          export MLFLOW_TRACKING_URI="https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
-          export MLFLOW_TRACKING_USERNAME="${{ secrets.DAGSHUB_USERNAME }}"
-          export MLFLOW_TRACKING_PASSWORD="${{ secrets.DAGSHUB_TOKEN }}"
-          
-          # Try to build Docker image with MLflow
-          if mlflow models build-docker \
-            -m "runs:/$RUN_ID/best_model" \
-            -n "${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest" \
-            --enable-mlserver; then
-            
-            echo "✅ MLflow build-docker successful!"
-            docker push "${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest"
-            
-          else
-            echo "⚠️ mlflow build-docker failed, creating alternative serving image..."
-            
-            # Create alternative MLflow serving Dockerfile
-            cat > Dockerfile.serving << 'EOF'
-            FROM condaforge/miniconda3:latest
-
-            WORKDIR /app
-
-            # Update conda and install mamba for faster package resolution
-            RUN conda update -n base -c defaults conda && \
-                conda install -n base -c conda-forge mamba
-
-            # Copy conda environment file
-            COPY conda.yaml .
-
-            # Create conda environment
-            RUN mamba env create -f conda.yaml
-
-            # Make RUN commands use the new environment
-            SHELL ["conda", "run", "-n", "diabetes-ml-env", "/bin/bash", "-c"]
-
-            # Copy all project files
-            COPY . .
-
-            # Expose MLflow serving port
-            EXPOSE 5000
-
-            # Create serving script
-            RUN echo '#!/bin/bash\n\
-            conda activate diabetes-ml-env\n\
-            if [ -d "saved_models" ] && [ "$(ls -A saved_models)" ]; then\n\
-              echo "🚀 Starting MLflow model server..."\n\
-              mlflow models serve -m saved_models -h 0.0.0.0 -p 5000\n\
-            else\n\
-              echo "📋 No models found, starting training..."\n\
-              python modelling.py\n\
-            fi' > /app/serve.sh && chmod +x /app/serve.sh
-
-            # Default command
-            CMD ["/app/serve.sh"]
-            EOF
-            
-            # Build alternative serving image
-            docker build -f Dockerfile.serving -t "${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest" .
-            docker push "${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest"
-            
+          # Extract run ID from MLflow output
+          RUN_ID=$(echo "$RUN_OUTPUT" | grep -o "Run ID: [a-f0-9]*" | head -1 | cut -d' ' -f3)
+          if [ -z "$RUN_ID" ]; then
+            # Alternative method to get latest run ID
+            RUN_ID=$(python -c "
+            import mlflow
+            import dagshub
+            dagshub.init(repo_owner='${{ env.DAGSHUB_USERNAME }}', repo_name='SMSML_Wildan-Mufid-Ramadhan', mlflow=True)
+            mlflow.set_tracking_uri('${{ env.MLFLOW_TRACKING_URI }}')
+            experiment = mlflow.get_experiment_by_name('CI_Auto_Training')
+            if experiment:
+                runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id], max_results=1, order_by=['start_time DESC'])
+                if not runs.empty:
+                    print(runs.iloc[0]['run_id'])
+            ")
           fi
           
-        else
-          echo "❌ No valid run ID found, creating basic conda-based serving image..."
+          echo "Run ID: $RUN_ID"
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_HUB_USERNAME }}
+          password: ${{ env.DOCKER_HUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        if: success() && steps.run-mlflow-project.outputs.run_id != ''
+        shell: bash -l {0}
+        run: |
+          conda activate diabetes-ml-env
+          cd MLProject
           
-          # Create basic conda serving image
-          cat > Dockerfile.basic << 'EOF'
-          FROM condaforge/miniconda3:latest
-
-          WORKDIR /app
-
-          # Update conda and install mamba
-          RUN conda update -n base -c defaults conda && \
-              conda install -n base -c conda-forge mamba
-
-          # Copy environment and requirements
-          COPY conda.yaml .
-          COPY requirements.txt .
-
-          # Create conda environment
-          RUN mamba env create -f conda.yaml
-
-          # Make RUN commands use the new environment
-          SHELL ["conda", "run", "-n", "diabetes-ml-env", "/bin/bash", "-c"]
-
-          # Copy project files
-          COPY . .
-
-          # Create entrypoint script
-          RUN echo '#!/bin/bash\n\
-          conda activate diabetes-ml-env\n\
-          echo "🚀 MLflow serving image ready (conda-based)"\n\
-          echo "📋 Available commands:"\n\
-          echo "  - Train model: python modelling.py"\n\
-          echo "  - Serve model: mlflow models serve -m <model-path> -h 0.0.0.0 -p 5000"\n\
-          echo "  - MLflow UI: mlflow ui -h 0.0.0.0 -p 5000"\n\
-          exec "$@"' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
-
-          EXPOSE 5000
-
-          ENTRYPOINT ["/app/entrypoint.sh"]
-          CMD ["conda", "run", "-n", "diabetes-ml-env", "python", "modelling.py"]
-          EOF
+          RUN_ID="${{ steps.run-mlflow-project.outputs.run_id }}"
+          echo "Building Docker image for run: $RUN_ID"
           
-          docker build -f Dockerfile.basic -t "${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest" .
-          docker push "${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest"
-        fi
+          # Build Docker image using mlflow build-docker
+          mlflow models build-docker \
+            --model-uri "runs:/$RUN_ID/best_model" \
+            --name "${{ env.DOCKER_HUB_USERNAME }}/diabetes-model" \
+            --enable-mlserver
+          
+          # Tag and push to Docker Hub
+          docker tag "${{ env.DOCKER_HUB_USERNAME }}/diabetes-model:latest" "${{ env.DOCKER_HUB_USERNAME }}/diabetes-model:${{ github.run_number }}"
+          docker push "${{ env.DOCKER_HUB_USERNAME }}/diabetes-model:latest"
+          docker push "${{ env.DOCKER_HUB_USERNAME }}/diabetes-model:${{ github.run_number }}"
 
-  deploy-info:
-    needs: [train-model, build-docker]
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-    - name: Display deployment info
-      env:
-        RUN_ID: ${{ needs.train-model.outputs.run-id }}
-        EXPERIMENT_ID: ${{ needs.train-model.outputs.experiment-id }}
-      run: |
-        echo "🎯 ML Pipeline Completed!"
-        echo "=========================================="
-        echo ""
-        echo "📊 MLflow Tracking: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
-        if [ "$EXPERIMENT_ID" != "" ] && [ "$EXPERIMENT_ID" != "no-experiment-found" ]; then
-          echo "🔬 Experiment: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow/#/experiments/$EXPERIMENT_ID"
-        fi
-        if [ "$RUN_ID" != "" ] && [ "$RUN_ID" != "no-run-found" ] && [[ ! "$RUN_ID" =~ ^error- ]]; then
-          echo "🆔 Run: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow/#/experiments/$EXPERIMENT_ID/runs/$RUN_ID"
-        fi
-        echo ""
-        echo "🐳 Docker Images:"
-        echo "   - ${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-model:latest"
-        echo "   - ${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-model:${{ github.run_number }}"
-        echo "   - ${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest"
-        echo ""
-        echo "📁 Artifacts saved to GitHub Actions artifacts"
-        echo "🔄 Training method: mlflow run with conda environment"
-        echo "🔄 Re-training triggered by: ${{ github.event_name }}"
-        echo ""
-        echo "🎮 Usage Examples:"
-        echo "docker run -p 5000:5000 ${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-model:latest"
-        echo "docker run -p 5000:5000 ${{ secrets.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest"
+      - name: Store artifacts
+        shell: bash -l {0}
+        run: |
+          # Create artifacts directory
+          mkdir -p stored_artifacts
+          
+          # Copy any local artifacts
+          if [ -d "MLProject/artifacts" ]; then
+            cp -r MLProject/artifacts/* stored_artifacts/
+          fi
+          
+          # Create build info
+          echo "Build: ${{ github.run_number }}" > stored_artifacts/build_info.txt
+          echo "Commit: ${{ github.sha }}" >> stored_artifacts/build_info.txt
+          echo "Run ID: ${{ steps.run-mlflow-project.outputs.run_id }}" >> stored_artifacts/build_info.txt
+          echo "Docker Image: ${{ env.DOCKER_HUB_USERNAME }}/diabetes-model:${{ github.run_number }}" >> stored_artifacts/build_info.txt
+          echo "Date: $(date)" >> stored_artifacts/build_info.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-artifacts-${{ github.run_number }}
+          path: stored_artifacts/
+          retention-days: 30
+
+      - name: Commit artifacts to repository
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add stored_artifacts/
+          git commit -m "Add model artifacts for build ${{ github.run_number }}" || echo "No changes to commit"
+          git push origin main || echo "Push failed"
+
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 MLflow CI/CD Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID**: ${{ steps.run-mlflow-project.outputs.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Image**: ${{ env.DOCKER_HUB_USERNAME }}/diabetes-model:${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **DagsHub MLflow**: [View Experiments](${{ env.MLFLOW_TRACKING_URI }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Hub**: [View Image](https://hub.docker.com/r/${{ env.DOCKER_HUB_USERNAME }}/diabetes-model)" >> $GITHUB_STEP_SUMMARY
