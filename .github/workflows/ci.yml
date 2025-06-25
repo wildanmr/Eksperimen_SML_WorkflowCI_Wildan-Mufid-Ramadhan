@@ -34,7 +34,7 @@ env:
 
 jobs:
   train-model:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     
     outputs:
       run-id: ${{ steps.mlflow-run.outputs.run-id }}
@@ -190,7 +190,7 @@ jobs:
 
   build-docker:
     needs: train-model
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     
     steps:
@@ -364,7 +364,7 @@ jobs:
 
   deploy-info:
     needs: [train-model, build-docker]
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     if: always()
     
     steps:
