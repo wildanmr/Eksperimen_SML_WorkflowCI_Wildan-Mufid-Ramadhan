@@ -48,9 +48,9 @@ Workflow-CI/
 
 Once the pipeline completes, the following Docker images are available:
 
-* `<username>/diabetes-ml-model:latest` - Standard training image
-* `<username>/diabetes-ml-model:<build-number>` - Versioned training image
-* `<username>/diabetes-ml-mlflow:latest` - MLflow serving image
+* `wildanmr/diabetes-ml-model:latest` - Standard training image
+* `wildanmr/diabetes-ml-model:<build-number>` - Versioned training image
+* `wildanmr/diabetes-ml-mlflow:latest` - MLflow serving image
 
 ### Run Serving Container
 
