@@ -43,14 +43,14 @@ def setup_dagshub_mlflow():
             os.environ['DAGSHUB_CLIENT_FAIL_IF_NO_TOKEN'] = 'true'
             
             # Initialize DagsHub
-            dagshub.init(repo_owner="wildanmr", repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
-            print("✅ DagsHub initialized successfully")
+            # dagshub.init(repo_owner="wildanmr", repo_name="SMSML_Wildan-Mufid-Ramadhan", mlflow=True)
+            # print("✅ DagsHub initialized successfully")
         except Exception as e:
             print(f"⚠️  DagsHub init warning: {e}")
             print("Proceeding with direct MLflow setup...")
         
         # Set tracking URI
-        tracking_uri = "https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
+        tracking_uri = os.getenv('MLFLOW_TRACKING_URI')
         mlflow.set_tracking_uri(tracking_uri)
         
         # Test connection
