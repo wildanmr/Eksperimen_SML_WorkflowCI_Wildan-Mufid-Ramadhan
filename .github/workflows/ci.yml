@@ -37,6 +37,10 @@ jobs:
   train-model:
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: write
+      packages: write
+
     outputs:
       run-id: ${{ steps.mlflow-run.outputs.run-id }}
       experiment-id: ${{ steps.mlflow-run.outputs.experiment-id }}
