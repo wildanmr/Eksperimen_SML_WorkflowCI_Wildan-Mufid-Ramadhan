@@ -184,12 +184,48 @@ jobs:
       run: |
         echo "📦 Creating release archive..."
         cd MLProject
-        tar -czf ../ml-artifacts-${{ github.ref_name }}.tar.gz \
-          artifacts/ \
-          saved_models/ \
-          mlruns/
-        cd ..
-        echo "✅ Archive created: ml-artifacts-${{ github.ref_name }}.tar.gz"
+        
+        # Check which directories exist
+        DIRS_TO_ARCHIVE=""
+        
+        if [ -d "artifacts" ] && [ "$(ls -A artifacts 2>/dev/null)" ]; then
+          echo "✅ Found artifacts directory"
+          DIRS_TO_ARCHIVE="$DIRS_TO_ARCHIVE artifacts/"
+        else
+          echo "⚠️ No artifacts directory found or empty"
+        fi
+        
+        if [ -d "saved_models" ] && [ "$(ls -A saved_models 2>/dev/null)" ]; then
+          echo "✅ Found saved_models directory"
+          DIRS_TO_ARCHIVE="$DIRS_TO_ARCHIVE saved_models/"
+        else
+          echo "⚠️ No saved_models directory found or empty"
+        fi
+        
+        if [ -d "mlruns" ] && [ "$(ls -A mlruns 2>/dev/null)" ]; then
+          echo "✅ Found mlruns directory"
+          DIRS_TO_ARCHIVE="$DIRS_TO_ARCHIVE mlruns/"
+        else
+          echo "⚠️ No mlruns directory found or empty"
+        fi
+        
+        if [ -n "$DIRS_TO_ARCHIVE" ]; then
+          echo "📁 Archiving directories: $DIRS_TO_ARCHIVE"
+          tar -czf ../ml-artifacts-${{ github.ref_name }}.tar.gz $DIRS_TO_ARCHIVE
+          cd ..
+          echo "✅ Archive created: ml-artifacts-${{ github.ref_name }}.tar.gz"
+          echo "📊 Archive contents:"
+          tar -tzf ml-artifacts-${{ github.ref_name }}.tar.gz | head -20
+        else
+          echo "❌ No directories to archive found!"
+          echo "🔍 Current directory contents:"
+          ls -la
+          cd ..
+          # Create empty archive with a README
+          echo "No ML artifacts were generated in this run." > no-artifacts.txt
+          tar -czf ml-artifacts-${{ github.ref_name }}.tar.gz no-artifacts.txt
+          echo "📝 Created empty archive with notice"
+        fi
 
     - name: Upload artifacts to release
       uses: softprops/action-gh-release@v1
