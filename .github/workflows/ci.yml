@@ -236,7 +236,7 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       with:
         tag_name: ${{ github.ref_name }}
-        name: ML Artifacts Release ${{ github.ref_name }}
+        name: ${{ github.ref_name }}
         body: |
           🤖 **Automated ML Artifacts Release**
           
@@ -258,6 +258,11 @@ jobs:
 
   build-docker:
     needs: train-model
+
+    permissions:
+      contents: write
+      packages: write
+
     runs-on: ubuntu-latest
     
     steps:
