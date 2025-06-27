@@ -1,0 +1,20 @@
+name: diabetes-prediction-ml
+
+conda_env: conda.yaml
+
+entry_points:
+  main:
+    parameters:
+      use_dagshub: {type: bool, default: true}
+    command: "python modelling_tuning.py --use_dagshub {use_dagshub}"
+  
+  train:
+    parameters:
+      use_dagshub: {type: bool, default: true}
+    command: "python modelling_tuning.py --use_dagshub {use_dagshub}"
+  
+  serve:
+    parameters:
+      model_path: {type: str, default: "saved_models"}
+      port: {type: int, default: 5000}
+    command: "mlflow models serve -m {model_path} -p {port} -h 0.0.0.0"

@@ -1,0 +1,387 @@
+name: MLflow CI/CD Pipeline
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      use_dagshub:
+        description: 'Use DagsHub for MLflow tracking'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      n_estimators:
+        description: 'Number of estimators (optional)'
+        required: false
+        default: ''
+      max_depth:
+        description: 'Max depth (optional)'
+        required: false
+        default: ''
+
+env:
+  DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+  DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.DAGSHUB_TOKEN }}
+  MLFLOW_TRACKING_URI: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+  DOCKER_HUB_TOKEN : ${{ secrets.DOCKER_HUB_TOKEN  }}
+  DATASET_URL: https://github.com/wildanmr/Eksperimen_SML_Wildan-Mufid-Ramadhan/releases/latest/download/diabetes_preprocessed.csv
+
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      packages: write
+
+    outputs:
+      run-id: ${{ steps.mlflow-run.outputs.run-id }}
+      experiment-id: ${{ steps.mlflow-run.outputs.experiment-id }}
+    
+    # Use bash shell with conda initialization
+    defaults:
+      run:
+        shell: bash -l {0}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Miniconda
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        miniconda-version: 'latest'
+        activate-environment: diabetes-ml-env
+        environment-file: MLProject/conda.yaml
+        auto-activate-base: false
+        auto-update-conda: true
+        python-version: '3.11'
+    
+    - name: Install MLflow
+      run: |
+        conda info
+        conda list
+        # MLflow should be installed from conda.yaml, but ensure it's available
+        pip install mlflow[extras]
+        mlflow --version
+        
+    - name: Download dataset to MLProject directory
+      run: |
+        cd MLProject
+        curl -L -o diabetes_preprocessed.csv ${{ env.DATASET_URL }}
+        ls -la *.csv
+    
+    - name: Run MLflow Project with conda environment
+      id: mlflow-run
+      env:
+        # Ensure authentication environment variables are set
+        DAGSHUB_USERNAME: ${{ env.DAGSHUB_USERNAME }}
+        DAGSHUB_TOKEN: ${{ env.DAGSHUB_TOKEN }}
+        MLFLOW_TRACKING_USERNAME: ${{ env.DAGSHUB_USERNAME }}
+        MLFLOW_TRACKING_PASSWORD: ${{ env.DAGSHUB_TOKEN }}
+        MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
+        # Prevent OAuth flow in CI
+        DAGSHUB_CLIENT_FAIL_IF_NO_TOKEN: "true"
+      run: |
+        cd MLProject
+        
+        # Verify authentication environment variables
+        echo "🔐 Checking authentication setup..."
+        if [ -z "$DAGSHUB_USERNAME" ]; then
+          echo "❌ DAGSHUB_USERNAME not set"
+          exit 1
+        fi
+        if [ -z "$DAGSHUB_TOKEN" ]; then
+          echo "❌ DAGSHUB_TOKEN not set"
+          exit 1
+        fi
+        echo "✅ Authentication credentials are configured"
+        echo "👤 Username: $DAGSHUB_USERNAME"
+        echo "🔗 Tracking URI: $MLFLOW_TRACKING_URI"
+        
+        # Set parameters from workflow inputs
+        USE_DAGSHUB="${{ github.event.inputs.use_dagshub || 'true' }}"
+        N_ESTIMATORS="${{ github.event.inputs.n_estimators }}"
+        MAX_DEPTH="${{ github.event.inputs.max_depth }}"
+        
+        echo "🚀 Running MLflow Project with mlflow run..."
+        echo "🔧 Use DagsHub: $USE_DAGSHUB"
+        echo "🌳 N Estimators: ${N_ESTIMATORS:-'default (grid search)'}"
+        echo "📏 Max Depth: ${MAX_DEPTH:-'default (grid search)'}"
+        
+        # Build mlflow run command with parameters
+        MLFLOW_CMD="mlflow run . --experiment-name CI_Auto_Training -P use_dagshub=$USE_DAGSHUB --env-manager conda"
+        
+        # Add optional parameters if provided
+        if [ ! -z "$N_ESTIMATORS" ]; then
+          MLFLOW_CMD="$MLFLOW_CMD -P n_estimators=$N_ESTIMATORS"
+        fi
+        
+        if [ ! -z "$MAX_DEPTH" ]; then
+          MLFLOW_CMD="$MLFLOW_CMD -P max_depth=$MAX_DEPTH"
+        fi
+        
+        echo "📝 Command: $MLFLOW_CMD"
+        echo ""
+        
+        # Run with authentication already set in environment
+        echo "🔄 Starting MLflow run with authentication..."
+        set -o pipefail
+        
+        # Run command with all environment variables properly set
+        PYTHONUNBUFFERED=1 eval "$MLFLOW_CMD" | tee /tmp/mlflow_output.log
+        
+        echo "📋 MLflow Run Output:"
+        cat /tmp/mlflow_output.log
+        
+        echo ""
+        echo "🔍 Extracting run information..."
+        
+        # Extract run ID from DagsHub URL in the output
+        RUN_ID=$(grep -oP "runs/\K[a-f0-9]{32}" /tmp/mlflow_output.log | tail -n 1)
+        EXPERIMENT_ID=$(grep -oP "experiments/\K[0-9]+" /tmp/mlflow_output.log | tail -n 1)
+        
+        # Fallback values if extraction fails
+        if [ -z "$RUN_ID" ]; then
+          RUN_ID="check-dagshub-ui"
+        fi
+        if [ -z "$EXPERIMENT_ID" ]; then
+          EXPERIMENT_ID="2"
+        fi
+        
+        echo "run-id=$RUN_ID" >> $GITHUB_OUTPUT
+        echo "experiment-id=$EXPERIMENT_ID" >> $GITHUB_OUTPUT
+        
+        echo "✅ MLflow run completed"
+        echo "🆔 Run ID: $RUN_ID" 
+        echo "🔬 Experiment ID: $EXPERIMENT_ID"
+        
+        # Verify artifacts were created
+        if [ -d "artifacts" ]; then
+          echo "📁 Artifacts created:"
+          ls -la artifacts/
+        fi
+        
+        if [ -d "saved_models" ]; then
+          echo "💾 Models saved:"
+          ls -la saved_models/
+        fi
+    
+    - name: Upload artifacts to GitHub
+      uses: actions/upload-artifact@v4
+      with:
+        name: ml-artifacts-${{ github.ref_name }}
+        path: |
+          MLProject/artifacts/
+          MLProject/saved_models/
+          MLProject/mlruns/
+        retention-days: 30
+
+    - name: Create release archive
+      run: |
+        echo "📦 Creating release archive..."
+        cd MLProject
+        
+        # Check which directories exist
+        DIRS_TO_ARCHIVE=""
+        
+        if [ -d "artifacts" ] && [ "$(ls -A artifacts 2>/dev/null)" ]; then
+          echo "✅ Found artifacts directory"
+          DIRS_TO_ARCHIVE="$DIRS_TO_ARCHIVE artifacts/"
+        else
+          echo "⚠️ No artifacts directory found or empty"
+        fi
+        
+        if [ -d "saved_models" ] && [ "$(ls -A saved_models 2>/dev/null)" ]; then
+          echo "✅ Found saved_models directory"
+          DIRS_TO_ARCHIVE="$DIRS_TO_ARCHIVE saved_models/"
+        else
+          echo "⚠️ No saved_models directory found or empty"
+        fi
+        
+        if [ -d "mlruns" ] && [ "$(ls -A mlruns 2>/dev/null)" ]; then
+          echo "✅ Found mlruns directory"
+          DIRS_TO_ARCHIVE="$DIRS_TO_ARCHIVE mlruns/"
+        else
+          echo "⚠️ No mlruns directory found or empty"
+        fi
+        
+        if [ -n "$DIRS_TO_ARCHIVE" ]; then
+          echo "📁 Archiving directories: $DIRS_TO_ARCHIVE"
+          tar -czf ../ml-artifacts-${{ github.ref_name }}.tar.gz $DIRS_TO_ARCHIVE
+          cd ..
+          echo "✅ Archive created: ml-artifacts-${{ github.ref_name }}.tar.gz"
+          echo "📊 Archive contents:"
+          tar -tzf ml-artifacts-${{ github.ref_name }}.tar.gz | head -20
+        else
+          echo "❌ No directories to archive found!"
+          echo "🔍 Current directory contents:"
+          ls -la
+          cd ..
+          # Create empty archive with a README
+          echo "No ML artifacts were generated in this run." > no-artifacts.txt
+          tar -czf ml-artifacts-${{ github.ref_name }}.tar.gz no-artifacts.txt
+          echo "📝 Created empty archive with notice"
+        fi
+
+    - name: Upload artifacts to release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: ${{ github.ref_name }}
+        body: |
+          🤖 **Automated ML Artifacts Release**
+          
+          This release contains the machine learning artifacts for tag ${{ github.ref_name }}:
+          - 📊 Training artifacts and metrics
+          - 🎯 Saved models
+          - 📈 MLflow runs data
+          
+          **Run Details:**
+          - Run ID: ${{ steps.mlflow-run.outputs.run-id }}
+          - Experiment ID: ${{ steps.mlflow-run.outputs.experiment-id }}
+          - Commit: ${{ github.sha }}
+        files: |
+          ml-artifacts-${{ github.ref_name }}.tar.gz
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-docker:
+    needs: train-model
+
+    permissions:
+      contents: write
+      packages: write
+
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_HUB_USERNAME }}
+        password: ${{ secrets.DOCKER_HUB_TOKEN }}
+    
+    - name: Download dataset for Docker build
+      run: |
+        cd MLProject
+        curl -L -o diabetes_preprocessed.csv ${{ env.DATASET_URL }}
+    
+    - name: Setup Miniconda for MLflow build
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        miniconda-version: 'latest'
+        activate-environment: diabetes-ml-env
+        environment-file: MLProject/conda.yaml
+        auto-activate-base: false
+        auto-update-conda: true
+        python-version: '3.11'
+    
+    - name: Install MLflow for Docker build
+      shell: bash -l {0}
+      run: |
+        conda list
+        # MLflow should be available from environment, add extras if needed
+        pip install mlflow[extras]
+    
+    - name: Build MLflow Docker image using mlflow build-docker
+      shell: bash -l {0}
+      env:
+        RUN_ID: ${{ needs.train-model.outputs.run-id }}
+        EXPERIMENT_ID: ${{ needs.train-model.outputs.experiment-id }}
+        MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
+        MLFLOW_TRACKING_USERNAME: ${{ env.DAGSHUB_USERNAME }}
+        MLFLOW_TRACKING_PASSWORD: ${{ env.DAGSHUB_TOKEN }}
+      run: |
+        echo "🐳 Building MLflow Docker image..."
+        echo "🆔 Using Run ID: $RUN_ID"
+        echo "🔬 Using Experiment ID: $EXPERIMENT_ID"
+        echo "🏷️ Using Tag: ${{ github.ref_name }}"
+        
+        cd MLProject
+        
+        # Login to registries
+        echo "🔐 Logging into registries..."
+        echo "${{ env.DOCKER_HUB_TOKEN }}" | docker login -u "${{ env.DOCKER_HUB_USERNAME }}" --password-stdin
+        echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        
+        # Build Docker image with MLflow (latest tag)
+        echo "🔨 Building image with latest tag..."
+        mlflow models build-docker \
+          -m "runs:/$RUN_ID/best_model" \
+          -n "${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest" \
+          --enable-mlserver
+        
+        # Tag for different registries and versions
+        echo "🏷️ Creating additional tags..."
+        
+        # Docker Hub tags
+        docker tag "${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest" \
+          "${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:${{ github.ref_name }}"
+        
+        # GHCR tags
+        docker tag "${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest" \
+          "ghcr.io/${{ github.repository_owner }}/diabetes-ml-mlflow:latest"
+        docker tag "${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest" \
+          "ghcr.io/${{ github.repository_owner }}/diabetes-ml-mlflow:${{ github.ref_name }}"
+        
+        # Push all images
+        echo "🚀 Pushing images..."
+        
+        # Push to Docker Hub
+        docker push "${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest"
+        docker push "${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:${{ github.ref_name }}"
+        
+        # Push to GHCR
+        docker push "ghcr.io/${{ github.repository_owner }}/diabetes-ml-mlflow:latest"
+        docker push "ghcr.io/${{ github.repository_owner }}/diabetes-ml-mlflow:${{ github.ref_name }}"
+        
+        echo "✅ All images built and pushed successfully!"
+
+  deploy-info:
+    needs: [train-model, build-docker]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Display deployment info
+      env:
+        RUN_ID: ${{ needs.train-model.outputs.run-id }}
+        EXPERIMENT_ID: ${{ needs.train-model.outputs.experiment-id }}
+      run: |
+        echo "🎯 ML Pipeline Completed!"
+        echo "=========================================="
+        echo ""
+        echo "📊 MLflow Tracking: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow"
+        if [ "$EXPERIMENT_ID" != "" ] && [ "$EXPERIMENT_ID" != "no-experiment-found" ]; then
+          echo "🔬 Experiment: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow/#/experiments/$EXPERIMENT_ID"
+        fi
+        if [ "$RUN_ID" != "" ] && [ "$RUN_ID" != "no-run-found" ] && [[ ! "$RUN_ID" =~ ^error- ]]; then
+          echo "🆔 Run: https://dagshub.com/wildanmr/SMSML_Wildan-Mufid-Ramadhan.mlflow/#/experiments/$EXPERIMENT_ID/runs/$RUN_ID"
+        fi
+        echo ""
+        echo "🐳 Docker Images:"
+        echo "  - Docker Hub: ${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:latest"
+        echo "  - Docker Hub: ${{ env.DOCKER_HUB_USERNAME }}/diabetes-ml-mlflow:${{ github.ref_name }}"
+        echo "  - GHCR: ghcr.io/${{ github.repository_owner }}/diabetes-ml-mlflow:latest"
+        echo "  - GHCR: ghcr.io/${{ github.repository_owner }}/diabetes-ml-mlflow:${{ github.ref_name }}"
+        echo ""
+        echo "📁 Artifacts saved to GitHub Actions artifacts"
+        echo "🔄 Training method: mlflow run with conda environment"
+        echo "🔄 Re-training triggered by: ${{ github.event_name }}"
