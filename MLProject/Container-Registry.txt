@@ -1,0 +1,2 @@
+ghcr: https://github.com/wildanmr/Eksperimen_SML_WorkflowCI_Wildan-Mufid-Ramadhan/pkgs/container/diabetes-ml-mlflow
+Docker Hub: https://hub.docker.com/r/wildanmr/diabetes-ml-mlflow
